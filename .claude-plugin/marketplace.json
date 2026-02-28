@@ -1,0 +1,21 @@
+{
+  "name": "ericboehs-claude-plugins",
+  "description": "Claude Code plugins by Eric Boehs — session analysis, workflow automation, and developer productivity tools",
+  "owner": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  },
+  "plugins": [
+    {
+      "name": "session-improver",
+      "version": "1.0.0",
+      "description": "Analyze Claude Code sessions to find token waste, linter loops, and missing automations, then recommend and apply fixes",
+      "author": {
+        "name": "Eric Boehs",
+        "url": "https://github.com/ericboehs"
+      },
+      "source": "./plugins/session-improver",
+      "category": "productivity"
+    }
+  ]
+}
