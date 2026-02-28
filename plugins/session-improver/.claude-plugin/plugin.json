@@ -1,0 +1,9 @@
+{
+  "name": "session-improver",
+  "version": "1.0.0",
+  "description": "Analyze Claude Code sessions to find token waste, linter loops, and missing automations, then recommend and apply fixes",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}
