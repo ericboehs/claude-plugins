@@ -102,7 +102,7 @@ Multi-language linting via PostToolUse hooks. Automatically runs configured lint
 Git workflow utilities — merge PRs, clean up branches, and handle worktrees in one command. See [full documentation](plugins/git-utils/README.md).
 
 **Usage:**
-- `/merge-and-cleanup` — Squash merge the current branch's PR, delete the branch, switch to main, pull, and clean up worktree if applicable
+- `/merge-and-cleanup` — Squash merge the current branch's PR, delete the branch, switch to the default branch, pull, and clean up worktree if applicable
 
 ## Contributing
 
