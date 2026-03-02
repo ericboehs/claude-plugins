@@ -1,0 +1,9 @@
+{
+  "name": "cli-email",
+  "version": "1.0.0",
+  "description": "CLI email management using himalaya, mbsync, and neomutt with local Maildir sync and search",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}
