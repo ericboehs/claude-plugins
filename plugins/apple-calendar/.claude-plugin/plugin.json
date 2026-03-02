@@ -1,0 +1,9 @@
+{
+  "name": "apple-calendar",
+  "version": "1.0.0",
+  "description": "Manage Apple Calendar from Claude Code using ical CLI with full CRUD, search, and calendar filtering",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}

@@ -63,6 +63,16 @@ CLI email management using himalaya, mbsync, and neomutt with local Maildir sync
 
 **Stack:** mbsync (IMAP sync) + himalaya (CLI) + neomutt (TUI) + goimapnotify (IMAP IDLE) + qmd (search)
 
+### apple-calendar
+
+Manage Apple Calendar from Claude Code using `ical` CLI with full CRUD, search, and calendar filtering.
+
+**Skills:**
+- `/calendar` — View agenda, create/update/delete events, search calendar
+- `/setup-calendar` — Install and configure the ical CLI tool
+
+**Features:** Full CRUD, natural language dates, recurring events, calendar filtering, JSON output with stable event IDs
+
 ## Contributing
 
 Each plugin lives in `plugins/<plugin-name>/` and needs:
