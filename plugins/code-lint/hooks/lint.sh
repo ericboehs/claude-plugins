@@ -6,6 +6,23 @@
 
 set -euo pipefail
 
+# Require jq for JSON parsing
+if ! command -v jq >/dev/null 2>&1; then
+  echo "code-lint: jq is required but not found in PATH" >&2
+  exit 0
+fi
+
+# Portable timeout wrapper (macOS may not have GNU timeout)
+# Usage: run_with_timeout <seconds>s <command> <file_path>
+if command -v timeout >/dev/null 2>&1; then
+  run_with_timeout() { timeout "$1" bash -c "$2 \"\$1\"" _ "$3" 2>&1; }
+elif command -v gtimeout >/dev/null 2>&1; then
+  run_with_timeout() { gtimeout "$1" bash -c "$2 \"\$1\"" _ "$3" 2>&1; }
+else
+  # No timeout available — run without time limit
+  run_with_timeout() { bash -c "$2 \"\$1\"" _ "$3" 2>&1; }
+fi
+
 # Read tool input from stdin
 INPUT=$(cat)
 
@@ -29,13 +46,19 @@ fi
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git -C "$(dirname "$FILE_PATH")" rev-parse --show-toplevel 2>/dev/null || dirname "$FILE_PATH")}"
 
 # Compute config path: ~/.claude/code-lint/<project-hash>/config.json
-# Hash follows Claude's convention: /Users/foo/Code/bar -> -Users-foo-Code-bar
+# Hash: /Users/foo/Code/bar -> Users-foo-Code-bar (slashes to dashes, leading dash stripped)
 PROJECT_HASH=$(echo "$PROJECT_DIR" | tr '/' '-' | sed 's/^-//')
 CONFIG_DIR="$HOME/.claude/code-lint/$PROJECT_HASH"
 CONFIG_FILE="$CONFIG_DIR/config.json"
 
 # No config = no-op
 if [[ ! -f "$CONFIG_FILE" ]]; then
+  exit 0
+fi
+
+# Validate config is parseable JSON
+if ! jq empty "$CONFIG_FILE" 2>/dev/null; then
+  echo "code-lint: config file is not valid JSON: $CONFIG_FILE" >&2
   exit 0
 fi
 
@@ -175,17 +198,21 @@ for LINTER in $LINTERS; do
   fi
 
   # Run autofix first if configured
-  # Pass FILE_PATH as a positional arg to avoid shell injection via filenames
   if [[ "$AUTOFIX_BEFORE_LINT" == "true" ]] && [[ -n "$AUTOFIX_CMD" ]]; then
-    cd "$PROJECT_DIR"
-    timeout "${TIMEOUT}s" bash -c "$AUTOFIX_CMD \"\$1\"" _ "$FILE_PATH" >/dev/null 2>&1 || true
+    cd "$PROJECT_DIR" || continue
+    AUTOFIX_OUTPUT=""
+    AUTOFIX_OUTPUT=$(run_with_timeout "${TIMEOUT}s" "$AUTOFIX_CMD" "$FILE_PATH") || {
+      AUTOFIX_EXIT=$?
+      if [[ $AUTOFIX_EXIT -ne 0 ]] && [[ -n "$AUTOFIX_OUTPUT" ]]; then
+        ERRORS="${ERRORS}\n[${LINTER}/autofix] ${AUTOFIX_OUTPUT}\n"
+      fi
+    }
   fi
 
   # Run lint check
-  # Pass FILE_PATH as a positional arg to avoid shell injection via filenames
-  cd "$PROJECT_DIR"
+  cd "$PROJECT_DIR" || continue
   LINT_OUTPUT=""
-  LINT_OUTPUT=$(timeout "${TIMEOUT}s" bash -c "$COMMAND \"\$1\"" _ "$FILE_PATH" 2>&1) || {
+  LINT_OUTPUT=$(run_with_timeout "${TIMEOUT}s" "$COMMAND" "$FILE_PATH") || {
     LINT_EXIT=$?
     if [[ $LINT_EXIT -eq 124 ]]; then
       ERRORS="${ERRORS}\n[${LINTER}] Timed out after ${TIMEOUT}s\n"

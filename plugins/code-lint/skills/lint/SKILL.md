@@ -116,16 +116,16 @@ If issues were found and autofix is available:
 4. For remaining issues, offer to fix them using the reference docs for guidance
 
 Read the relevant reference docs for fix patterns:
-- Ruby: `${CLAUDE_PLUGIN_DIR}/references/ruby-patterns.md`
-- JS/TS: `${CLAUDE_PLUGIN_DIR}/references/js-ts-patterns.md`
-- Python: `${CLAUDE_PLUGIN_DIR}/references/python-patterns.md`
-- Go: `${CLAUDE_PLUGIN_DIR}/references/go-patterns.md`
-- Rust: `${CLAUDE_PLUGIN_DIR}/references/rust-patterns.md`
-- Markdown: `${CLAUDE_PLUGIN_DIR}/references/markdown-patterns.md`
-- HTML: `${CLAUDE_PLUGIN_DIR}/references/html-patterns.md`
-- Shell: `${CLAUDE_PLUGIN_DIR}/references/shell-patterns.md`
+- Ruby: `${CLAUDE_PLUGIN_ROOT}/references/ruby-patterns.md`
+- JS/TS: `${CLAUDE_PLUGIN_ROOT}/references/js-ts-patterns.md`
+- Python: `${CLAUDE_PLUGIN_ROOT}/references/python-patterns.md`
+- Go: `${CLAUDE_PLUGIN_ROOT}/references/go-patterns.md`
+- Rust: `${CLAUDE_PLUGIN_ROOT}/references/rust-patterns.md`
+- Markdown: `${CLAUDE_PLUGIN_ROOT}/references/markdown-patterns.md`
+- HTML: `${CLAUDE_PLUGIN_ROOT}/references/html-patterns.md`
+- Shell: `${CLAUDE_PLUGIN_ROOT}/references/shell-patterns.md`
 
-If `CLAUDE_PLUGIN_DIR` is not set, find references relative to this SKILL.md (two directories up: `../../references/`).
+If `CLAUDE_PLUGIN_ROOT` is not set, find references relative to this SKILL.md (two directories up: `../../references/`).
 
 ## Behavior
 

@@ -1,7 +1,7 @@
 ---
 name: setup-lint
 description: Configure per-project linting for the code-lint plugin. Detects languages and linters, interviews the user, writes config. Use when user says "/setup-lint".
-tools: Bash, Read, Write, Edit
+tools: Bash, Read, Write, Edit, AskUserQuestion
 ---
 
 # Setup Lint
@@ -13,10 +13,10 @@ Interactive setup wizard for the code-lint plugin. Detects project languages and
 Run the detection script to discover languages, linter configs, and available binaries:
 
 ```bash
-bash "${CLAUDE_SKILL_DIR}/scripts/detect-project.sh" "${CLAUDE_PROJECT_DIR:-$(pwd)}"
+bash "${CLAUDE_PLUGIN_ROOT}/skills/setup-lint/scripts/detect-project.sh" "${CLAUDE_PROJECT_DIR:-$(pwd)}"
 ```
 
-If `CLAUDE_SKILL_DIR` is not set, find the script relative to this SKILL.md file.
+If `CLAUDE_PLUGIN_ROOT` is not set, find the script relative to this SKILL.md file (`./scripts/detect-project.sh`).
 
 Parse the JSON output — it describes which languages are present and which linters are available/configured.
 

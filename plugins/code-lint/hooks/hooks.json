@@ -1,16 +1,16 @@
 {
-  "hooks": [
-    {
-      "matcher": {
-        "event": "PostToolUse",
-        "tool_name": "Edit|Write"
-      },
-      "hooks": [
-        {
-          "type": "command",
-          "command": "\"$CLAUDE_PLUGIN_DIR/hooks/lint.sh\""
-        }
-      ]
-    }
-  ]
+  "description": "Automatic linting on file edit/write",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/lint.sh"
+          }
+        ]
+      }
+    ]
+  }
 }

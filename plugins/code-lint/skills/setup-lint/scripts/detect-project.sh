@@ -6,7 +6,17 @@
 set -euo pipefail
 shopt -s globstar 2>/dev/null || true
 
+# Require jq for JSON output
+if ! command -v jq >/dev/null 2>&1; then
+  echo '{"error": "jq is required but not found in PATH"}' >&2
+  exit 1
+fi
+
 PROJECT_DIR="${1:-$(pwd)}"
+if [[ ! -d "$PROJECT_DIR" ]]; then
+  echo "{\"error\": \"directory not found: $PROJECT_DIR\"}" >&2
+  exit 1
+fi
 cd "$PROJECT_DIR"
 
 # Helper: check if a command exists
@@ -48,8 +58,8 @@ detect_languages() {
     languages+=("markdown")
   fi
 
-  # HTML
-  if compgen -G "*.html" >/dev/null 2>&1 || compgen -G "**/*.html" >/dev/null 2>&1; then
+  # HTML/CSS
+  if compgen -G "*.html" >/dev/null 2>&1 || compgen -G "**/*.html" >/dev/null 2>&1 || compgen -G "*.css" >/dev/null 2>&1 || compgen -G "**/*.css" >/dev/null 2>&1; then
     languages+=("html")
   fi
 
@@ -58,7 +68,9 @@ detect_languages() {
     languages+=("shell")
   fi
 
-  printf '%s\n' "${languages[@]}"
+  if [[ ${#languages[@]} -gt 0 ]]; then
+    printf '%s\n' "${languages[@]}"
+  fi
 }
 
 # Detect linter configs and availability for a language
@@ -223,23 +235,17 @@ detect_linters() {
   esac
 }
 
-# Main output
-# Safely encode project_dir for JSON
-ESCAPED_PROJECT_DIR=$(printf '%s' "$PROJECT_DIR" | jq -Rs '.')
-echo "{"
-echo "  \"project_dir\": ${ESCAPED_PROJECT_DIR},"
-echo "  \"languages\": {"
-
+# Main output — build JSON with jq to ensure validity
 mapfile -t LANGUAGES < <(detect_languages)
-LANG_COUNT=${#LANGUAGES[@]}
-for ((i = 0; i < LANG_COUNT; i++)); do
-  LANG_NAME="${LANGUAGES[$i]}"
-  COMMA=""
-  if [[ $i -lt $((LANG_COUNT - 1)) ]]; then
-    COMMA=","
-  fi
-  echo "  \"$LANG_NAME\": $(detect_linters "$LANG_NAME")${COMMA}"
+
+# Start with base object
+RESULT=$(jq -n --arg dir "$PROJECT_DIR" '{"project_dir": $dir, "languages": {}}')
+
+for LANG_NAME in "${LANGUAGES[@]}"; do
+  # Skip empty entries (can happen if detect_languages outputs blank lines)
+  [[ -z "$LANG_NAME" ]] && continue
+  LINTER_JSON=$(detect_linters "$LANG_NAME")
+  RESULT=$(echo "$RESULT" | jq --arg lang "$LANG_NAME" --argjson linters "$LINTER_JSON" '.languages[$lang] = $linters')
 done
 
-echo "  }"
-echo "}"
+echo "$RESULT" | jq .
