@@ -89,7 +89,7 @@ Slack messaging, status, and search using `slk` CLI (Slack Gem).
 
 ### code-lint
 
-Multi-language linting via PostToolUse hooks. Automatically runs configured linters when files are edited, feeding errors back to Claude for immediate correction.
+Multi-language linting via PostToolUse hooks. Automatically runs configured linters when files are edited, feeding errors back to Claude for immediate correction. See [full documentation](plugins/code-lint/README.md).
 
 **Skills:**
 - `/setup-lint` — Detect languages and linters, configure per-project linting
