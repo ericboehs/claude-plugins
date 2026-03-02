@@ -1,0 +1,9 @@
+{
+  "name": "git-utils",
+  "version": "1.0.0",
+  "description": "Git workflow utilities — merge PRs, clean up branches, and handle worktrees in one command",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}
