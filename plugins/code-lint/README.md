@@ -32,14 +32,14 @@ Full-project lint (includes whole-project-only linters like brakeman and clippy)
 
 | Language | Linters | Autofix | Notes |
 |----------|---------|---------|-------|
-| Ruby | rubocop, reek, brakeman | rubocop -A | brakeman is whole-project only |
-| JS/TS | eslint, biome | eslint --fix, biome --write | |
-| Python | ruff, mypy, flake8 | ruff --fix | |
-| Go | golangci-lint | | |
-| Rust | clippy | | whole-project only |
-| Markdown | markdownlint | markdownlint --fix | via markdownlint-cli |
-| HTML | htmlhint, prettier | prettier --write | prettier also handles CSS |
-| Shell | shellcheck | | static analysis for sh/bash/zsh |
+| Ruby | [rubocop](https://github.com/rubocop/rubocop), [reek](https://github.com/troessner/reek), [brakeman](https://github.com/presidentbeef/brakeman) | rubocop -A | brakeman is whole-project only |
+| JS/TS | [eslint](https://github.com/eslint/eslint), [biome](https://github.com/biomejs/biome) | eslint --fix, biome --write | |
+| Python | [ruff](https://github.com/astral-sh/ruff), [mypy](https://github.com/python/mypy), [flake8](https://github.com/PyCQA/flake8) | ruff --fix | |
+| Go | [golangci-lint](https://github.com/golangci/golangci-lint) | | |
+| Rust | [clippy](https://github.com/rust-lang/rust-clippy) | | whole-project only |
+| Markdown | [markdownlint](https://github.com/DavidAnson/markdownlint) | markdownlint --fix | via markdownlint-cli |
+| HTML | [htmlhint](https://github.com/htmlhint/HTMLHint), [prettier](https://github.com/prettier/prettier) | prettier --write | prettier also handles CSS |
+| Shell | [shellcheck](https://github.com/koalaman/shellcheck) | | static analysis for sh/bash/zsh |
 
 ## Hook Behavior
 

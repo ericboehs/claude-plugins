@@ -20,7 +20,7 @@ claude plugins:install session-improver
 
 ### session-improver
 
-Analyze Claude Code session transcripts and recommend improvements to reduce token waste, prevent linter loops, and automate repetitive workflows.
+Analyze Claude Code session transcripts and recommend improvements to reduce token waste, prevent linter loops, and automate repetitive workflows. See [full documentation](plugins/session-improver/README.md).
 
 **Usage:**
 - `/improve-session` — Analyze the most recent session
@@ -45,7 +45,7 @@ Includes pre-built fix templates for common Ruby linting issues (Reek + RuboCop)
 
 ### apple-reminders
 
-Manage Apple Reminders from Claude Code using `remindctl` CLI.
+Manage Apple Reminders from Claude Code using `remindctl` CLI. See [full documentation](plugins/apple-reminders/README.md).
 
 **Usage:**
 - `/reminders` — Show today's reminders
@@ -55,7 +55,7 @@ Manage Apple Reminders from Claude Code using `remindctl` CLI.
 
 ### cli-email
 
-CLI email management using himalaya, mbsync, and neomutt with local Maildir sync and search.
+CLI email management using himalaya, mbsync, and neomutt with local Maildir sync and search. See [full documentation](plugins/cli-email/README.md).
 
 **Skills:**
 - `/check-email` — List unread, read messages, archive, search email
@@ -65,7 +65,7 @@ CLI email management using himalaya, mbsync, and neomutt with local Maildir sync
 
 ### apple-calendar
 
-Manage Apple Calendar from Claude Code using `ical` CLI with full CRUD, search, and calendar filtering.
+Manage Apple Calendar from Claude Code using `ical` CLI with full CRUD, search, and calendar filtering. See [full documentation](plugins/apple-calendar/README.md).
 
 **Skills:**
 - `/calendar` — View agenda, create/update/delete events, search calendar
@@ -75,7 +75,7 @@ Manage Apple Calendar from Claude Code using `ical` CLI with full CRUD, search, 
 
 ### slack
 
-Slack messaging, status, and search using `slk` CLI (Slack Gem).
+Slack messaging, status, and search using `slk` CLI (Slack Gem). See [full documentation](plugins/slack/README.md).
 
 **Skills:**
 - `/slack` — Check unread, read messages, search, set status/DND, browse activity
