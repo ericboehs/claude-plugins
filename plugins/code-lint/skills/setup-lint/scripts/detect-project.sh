@@ -4,6 +4,7 @@
 # Usage: detect-project.sh [project-dir]
 
 set -euo pipefail
+shopt -s globstar 2>/dev/null || true
 
 PROJECT_DIR="${1:-$(pwd)}"
 cd "$PROJECT_DIR"
@@ -11,24 +12,6 @@ cd "$PROJECT_DIR"
 # Helper: check if a command exists
 cmd_exists() {
   command -v "$1" >/dev/null 2>&1
-}
-
-# Helper: check if a command exists in project context (bundle exec, npx, etc.)
-project_cmd_exists() {
-  local cmd="$1"
-  case "$cmd" in
-    "bundle exec"*)
-      [[ -f Gemfile ]] && bundle list 2>/dev/null | grep -q "${cmd##*exec }" 2>/dev/null
-      ;;
-    "npx "*)
-      local pkg="${cmd##npx }"
-      pkg="${pkg%% *}"
-      [[ -f package.json ]] && (jq -e ".devDependencies[\"$pkg\"] // .dependencies[\"$pkg\"]" package.json >/dev/null 2>&1 || cmd_exists "$pkg")
-      ;;
-    *)
-      cmd_exists "$cmd"
-      ;;
-  esac
 }
 
 # Detect languages present in the project
@@ -241,19 +224,21 @@ detect_linters() {
 }
 
 # Main output
+# Safely encode project_dir for JSON
+ESCAPED_PROJECT_DIR=$(printf '%s' "$PROJECT_DIR" | jq -Rs '.')
 echo "{"
-echo "  \"project_dir\": \"$PROJECT_DIR\","
+echo "  \"project_dir\": ${ESCAPED_PROJECT_DIR},"
 echo "  \"languages\": {"
 
-LANGUAGES=($(detect_languages))
+mapfile -t LANGUAGES < <(detect_languages)
 LANG_COUNT=${#LANGUAGES[@]}
 for ((i = 0; i < LANG_COUNT; i++)); do
-  LANG="${LANGUAGES[$i]}"
+  LANG_NAME="${LANGUAGES[$i]}"
   COMMA=""
   if [[ $i -lt $((LANG_COUNT - 1)) ]]; then
     COMMA=","
   fi
-  echo "  \"$LANG\": $(detect_linters "$LANG")${COMMA}"
+  echo "  \"$LANG_NAME\": $(detect_linters "$LANG_NAME")${COMMA}"
 done
 
 echo "  }"

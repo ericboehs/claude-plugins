@@ -30,8 +30,6 @@ PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git -C "$(dirname "$FILE_PATH")" rev-parse 
 
 # Compute config path: ~/.claude/code-lint/<project-hash>/config.json
 # Hash follows Claude's convention: /Users/foo/Code/bar -> -Users-foo-Code-bar
-PROJECT_HASH=$(echo "$PROJECT_DIR" | sed 's|/|-|g; s|^-||; s|-$||')
-# Handle leading slash producing leading dash
 PROJECT_HASH=$(echo "$PROJECT_DIR" | tr '/' '-' | sed 's/^-//')
 CONFIG_DIR="$HOME/.claude/code-lint/$PROJECT_HASH"
 CONFIG_FILE="$CONFIG_DIR/config.json"
@@ -106,7 +104,7 @@ if [[ -z "$LANGUAGE" ]]; then
 fi
 
 # Check if language is enabled
-LANG_ENABLED=$(jq -r ".languages.${LANGUAGE}.enabled // false" "$CONFIG_FILE")
+LANG_ENABLED=$(jq -r ".languages[\"${LANGUAGE}\"].enabled // false" "$CONFIG_FILE")
 if [[ "$LANG_ENABLED" != "true" ]]; then
   exit 0
 fi
@@ -117,6 +115,7 @@ REL_PATH="${FILE_PATH#"$PROJECT_DIR"/}"
 # Get hook settings
 AUTOFIX_BEFORE_LINT=$(jq -r '.hook_settings.autofix_before_lint // false' "$CONFIG_FILE")
 SKIP_GENERATED=$(jq -r '.hook_settings.skip_generated_files // true' "$CONFIG_FILE")
+STOP_ON_FIRST=$(jq -r '.hook_settings.stop_on_first_failure // false' "$CONFIG_FILE")
 
 # Skip generated files (check for common generated file markers)
 if [[ "$SKIP_GENERATED" == "true" ]]; then
@@ -130,23 +129,28 @@ ERRORS=""
 HAD_FAILURE=0
 
 # Iterate over linters for this language
-LINTERS=$(jq -r ".languages.${LANGUAGE}.linters | keys[]" "$CONFIG_FILE" 2>/dev/null || true)
+LINTERS=$(jq -r ".languages[\"${LANGUAGE}\"].linters | keys[]" "$CONFIG_FILE" 2>/dev/null || true)
 
 for LINTER in $LINTERS; do
-  # Check if linter is enabled
-  LINTER_ENABLED=$(jq -r ".languages.${LANGUAGE}.linters.${LINTER}.enabled // false" "$CONFIG_FILE")
+  # Stop early if configured and we already have a failure
+  if [[ "$STOP_ON_FIRST" == "true" ]] && [[ $HAD_FAILURE -eq 1 ]]; then
+    break
+  fi
+
+  # Use bracket notation for jq to handle linter names with hyphens (e.g. golangci-lint)
+  LINTER_ENABLED=$(jq -r ".languages[\"${LANGUAGE}\"].linters[\"${LINTER}\"].enabled // false" "$CONFIG_FILE")
   if [[ "$LINTER_ENABLED" != "true" ]]; then
     continue
   fi
 
   # Skip whole-project-only linters in hook mode
-  WHOLE_PROJECT=$(jq -r ".languages.${LANGUAGE}.linters.${LINTER}.whole_project_only // false" "$CONFIG_FILE")
+  WHOLE_PROJECT=$(jq -r ".languages[\"${LANGUAGE}\"].linters[\"${LINTER}\"].whole_project_only // false" "$CONFIG_FILE")
   if [[ "$WHOLE_PROJECT" == "true" ]]; then
     continue
   fi
 
   # Check file patterns
-  FILE_PATTERNS=$(jq -c ".languages.${LANGUAGE}.linters.${LINTER}.file_patterns // null" "$CONFIG_FILE")
+  FILE_PATTERNS=$(jq -c ".languages[\"${LANGUAGE}\"].linters[\"${LINTER}\"].file_patterns // null" "$CONFIG_FILE")
   if [[ "$FILE_PATTERNS" != "null" ]]; then
     if ! matches_pattern "$FILE_PATH" "$FILE_PATTERNS"; then
       continue
@@ -154,7 +158,7 @@ for LINTER in $LINTERS; do
   fi
 
   # Check exclude patterns
-  EXCLUDE_PATTERNS=$(jq -c ".languages.${LANGUAGE}.linters.${LINTER}.exclude_patterns // null" "$CONFIG_FILE")
+  EXCLUDE_PATTERNS=$(jq -c ".languages[\"${LANGUAGE}\"].linters[\"${LINTER}\"].exclude_patterns // null" "$CONFIG_FILE")
   if [[ "$EXCLUDE_PATTERNS" != "null" ]]; then
     if matches_pattern "$REL_PATH" "$EXCLUDE_PATTERNS"; then
       continue
@@ -162,30 +166,35 @@ for LINTER in $LINTERS; do
   fi
 
   # Get commands
-  COMMAND=$(jq -r ".languages.${LANGUAGE}.linters.${LINTER}.command // empty" "$CONFIG_FILE")
-  AUTOFIX_CMD=$(jq -r ".languages.${LANGUAGE}.linters.${LINTER}.autofix_command // empty" "$CONFIG_FILE")
-  TIMEOUT=$(jq -r ".languages.${LANGUAGE}.linters.${LINTER}.timeout // 30" "$CONFIG_FILE")
+  COMMAND=$(jq -r ".languages[\"${LANGUAGE}\"].linters[\"${LINTER}\"].command // empty" "$CONFIG_FILE")
+  AUTOFIX_CMD=$(jq -r ".languages[\"${LANGUAGE}\"].linters[\"${LINTER}\"].autofix_command // empty" "$CONFIG_FILE")
+  TIMEOUT=$(jq -r ".languages[\"${LANGUAGE}\"].linters[\"${LINTER}\"].timeout // 30" "$CONFIG_FILE")
 
   if [[ -z "$COMMAND" ]]; then
     continue
   fi
 
   # Run autofix first if configured
+  # Pass FILE_PATH as a positional arg to avoid shell injection via filenames
   if [[ "$AUTOFIX_BEFORE_LINT" == "true" ]] && [[ -n "$AUTOFIX_CMD" ]]; then
     cd "$PROJECT_DIR"
-    timeout "${TIMEOUT}s" bash -c "$AUTOFIX_CMD \"$FILE_PATH\"" >/dev/null 2>&1 || true
+    timeout "${TIMEOUT}s" bash -c "$AUTOFIX_CMD \"\$1\"" _ "$FILE_PATH" >/dev/null 2>&1 || true
   fi
 
   # Run lint check
+  # Pass FILE_PATH as a positional arg to avoid shell injection via filenames
   cd "$PROJECT_DIR"
   LINT_OUTPUT=""
-  LINT_OUTPUT=$(timeout "${TIMEOUT}s" bash -c "$COMMAND \"$FILE_PATH\"" 2>&1) || {
+  LINT_OUTPUT=$(timeout "${TIMEOUT}s" bash -c "$COMMAND \"\$1\"" _ "$FILE_PATH" 2>&1) || {
     LINT_EXIT=$?
     if [[ $LINT_EXIT -eq 124 ]]; then
       ERRORS="${ERRORS}\n[${LINTER}] Timed out after ${TIMEOUT}s\n"
       HAD_FAILURE=1
     elif [[ -n "$LINT_OUTPUT" ]]; then
       ERRORS="${ERRORS}\n[${LINTER}] ${LINT_OUTPUT}\n"
+      HAD_FAILURE=1
+    else
+      ERRORS="${ERRORS}\n[${LINTER}] Exited with status ${LINT_EXIT} (no output)\n"
       HAD_FAILURE=1
     fi
   }
