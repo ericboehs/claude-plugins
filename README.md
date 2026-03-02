@@ -97,6 +97,13 @@ Multi-language linting via PostToolUse hooks. Automatically runs configured lint
 
 **Supported:** Ruby (rubocop, reek, brakeman), JS/TS (eslint, biome), Python (ruff, mypy, flake8), Go (golangci-lint), Rust (clippy), Markdown (markdownlint), HTML (htmlhint, prettier), Shell (shellcheck)
 
+### git-utils
+
+Git workflow utilities — merge PRs, clean up branches, and handle worktrees in one command. See [full documentation](plugins/git-utils/README.md).
+
+**Usage:**
+- `/merge-and-cleanup` — Squash merge the current branch's PR, delete the branch, switch to main, pull, and clean up worktree if applicable
+
 ## Contributing
 
 Each plugin lives in `plugins/<plugin-name>/` and needs:
