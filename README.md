@@ -43,6 +43,26 @@ Analyze Claude Code session transcripts and recommend improvements to reduce tok
 
 Includes pre-built fix templates for common Ruby linting issues (Reek + RuboCop).
 
+### apple-reminders
+
+Manage Apple Reminders from Claude Code using `remindctl` CLI.
+
+**Usage:**
+- `/reminders` — Show today's reminders
+- `/reminders list` — Show all reminder lists
+- `/reminders add Buy milk` — Quick add to default list
+- `/reminders add Buy milk --list Groceries --due tomorrow` — Add with options
+
+### cli-email
+
+CLI email management using himalaya, mbsync, and neomutt with local Maildir sync and search.
+
+**Skills:**
+- `/check-email` — List unread, read messages, archive, search email
+- `/setup-email` — Guided install/configure of the full CLI email stack
+
+**Stack:** mbsync (IMAP sync) + himalaya (CLI) + neomutt (TUI) + goimapnotify (IMAP IDLE) + qmd (search)
+
 ## Contributing
 
 Each plugin lives in `plugins/<plugin-name>/` and needs:
