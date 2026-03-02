@@ -73,6 +73,20 @@ Manage Apple Calendar from Claude Code using `ical` CLI with full CRUD, search, 
 
 **Features:** Full CRUD, natural language dates, recurring events, calendar filtering, JSON output with stable event IDs
 
+### slack
+
+Slack messaging, status, and search using `slk` CLI (Slack Gem).
+
+**Skills:**
+- `/slack` — Check unread, read messages, search, set status/DND, browse activity
+- `/setup-slack` — Install and configure slk CLI
+
+**Examples:**
+- `/slack` — Show unread messages across all workspaces
+- `/slack messages #eert-teammates-internal --since 1d` — Read recent channel messages
+- `/slack search "deploy" --in #platform-sre-team` — Search messages
+- `/slack preset focus` — Apply a status preset
+
 ## Contributing
 
 Each plugin lives in `plugins/<plugin-name>/` and needs:
