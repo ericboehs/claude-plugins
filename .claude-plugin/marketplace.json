@@ -16,6 +16,17 @@
       },
       "source": "./plugins/session-improver",
       "category": "productivity"
+    },
+    {
+      "name": "apple-reminders",
+      "version": "1.0.0",
+      "description": "Manage Apple Reminders from Claude Code using remindctl CLI",
+      "author": {
+        "name": "Eric Boehs",
+        "url": "https://github.com/ericboehs"
+      },
+      "source": "./plugins/apple-reminders",
+      "category": "productivity"
     }
   ]
 }
