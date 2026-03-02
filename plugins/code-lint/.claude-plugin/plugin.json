@@ -1,0 +1,9 @@
+{
+  "name": "code-lint",
+  "version": "1.0.0",
+  "description": "Multi-language linting via PostToolUse hooks with per-project config and interactive setup wizard",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}

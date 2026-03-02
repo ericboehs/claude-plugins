@@ -87,6 +87,16 @@ Slack messaging, status, and search using `slk` CLI (Slack Gem).
 - `/slack search "deploy" --in #platform-sre-team` — Search messages
 - `/slack preset focus` — Apply a status preset
 
+### code-lint
+
+Multi-language linting via PostToolUse hooks. Automatically runs configured linters when files are edited, feeding errors back to Claude for immediate correction.
+
+**Skills:**
+- `/setup-lint` — Detect languages and linters, configure per-project linting
+- `/lint` — Run all configured linters across the full project
+
+**Supported:** Ruby (rubocop, reek, brakeman), JS/TS (eslint, biome), Python (ruff, mypy, flake8), Go (golangci-lint), Rust (clippy), Markdown (markdownlint), HTML (htmlhint, prettier), Shell (shellcheck)
+
 ## Contributing
 
 Each plugin lives in `plugins/<plugin-name>/` and needs:
