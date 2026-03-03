@@ -1,0 +1,9 @@
+{
+  "name": "gh-copilot-review",
+  "version": "1.0.0",
+  "description": "Wait for GitHub Copilot PR reviews, address feedback, resolve threads, and push fixes",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}
