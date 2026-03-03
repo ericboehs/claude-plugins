@@ -12,7 +12,7 @@ Monitor GitHub Actions CI status for the current branch, waiting until all check
 
 ### 1. Run the watch script
 
-Run `${CLAUDE_PLUGIN_ROOT}/scripts/watch-ci.sh` and wait for it to exit. It auto-detects the current branch, checks for a PR first (using `gh pr checks`), and falls back to workflow runs if no PR exists. It polls every 10 seconds by default.
+Run `${CLAUDE_PLUGIN_ROOT}/scripts/watch-ci.sh` and wait for it to exit. It auto-detects the current branch, checks for a PR first (using `gh pr checks --json`), and falls back to workflow runs if no PR exists. It polls every 10 seconds by default. To use a custom interval, pass it as the first argument (e.g., `watch-ci.sh 30`). Minimum is 5 seconds.
 
 If `CLAUDE_PLUGIN_ROOT` is not set, find the script relative to this SKILL.md (`../../scripts/watch-ci.sh`).
 

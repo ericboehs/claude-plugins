@@ -1,11 +1,8 @@
 #!/usr/bin/env bash
 
 # Script to watch CI status for the current branch
-# Usage: watch-ci.sh [interval_seconds]
+# Usage: watch-ci.sh [-h|--help] [interval_seconds]
 # Default interval: 10s (minimum: 5s)
-
-# Default interval (in seconds)
-INTERVAL=${1:-10}
 
 if [[ "${1:-}" == "-h" ]] || [[ "${1:-}" == "--help" ]]; then
   echo "Usage: $(basename "$0") [interval_seconds]"
@@ -17,7 +14,14 @@ if [[ "${1:-}" == "-h" ]] || [[ "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-if [ "$INTERVAL" -lt 5 ] 2>/dev/null; then
+INTERVAL=${1:-10}
+
+if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]]; then
+  echo "Error: interval must be a positive integer, got '$INTERVAL'"
+  exit 1
+fi
+
+if [ "$INTERVAL" -lt 5 ]; then
   echo "Warning: Interval too low ($INTERVAL), using minimum of 5 seconds"
   INTERVAL=5
 fi
@@ -57,6 +61,7 @@ echo -e "Watching CI for branch: ${BLUE}$BRANCH${NC}"
 echo "Refresh interval: ${INTERVAL}s (press Ctrl+C to stop)"
 echo ""
 
+# Returns: 0 = checks still running, 1 = failure detected, 2 = all checks passed
 show_ci_status() {
   local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
 
@@ -66,39 +71,53 @@ show_ci_status() {
   echo "Press Ctrl+C to stop watching"
   echo ""
 
-  # Try to get PR checks first
-  PR_CHECKS=$(gh pr checks 2>/dev/null) || true
-  if [ -n "$PR_CHECKS" ]; then
+  # Try to get PR checks first (use JSON for reliable parsing)
+  local pr_json
+  pr_json=$(gh pr checks --json name,state,completedAt,detailsUrl 2>/dev/null) || true
+  if [ -n "$pr_json" ] && [ "$pr_json" != "[]" ]; then
     echo "CI Check Results:"
     echo "===================="
 
-    while IFS=$'\t' read -r name status duration url; do
-      case "$status" in
-        "pass")
-          echo -e "${GREEN}PASS${NC} $name - ${duration}"
+    echo "$pr_json" | jq -r '.[] | "\(.name)\t\(.state)\t\(.detailsUrl // "")"' | while IFS=$'\t' read -r name state url; do
+      case "$state" in
+        "SUCCESS")
+          echo -e "${GREEN}PASS${NC} $name"
           ;;
-        "fail")
-          echo -e "${RED}FAIL${NC} $name - ${duration}"
-          echo -e "     ${BLUE}$url${NC}"
+        "FAILURE"|"ERROR")
+          echo -e "${RED}FAIL${NC} $name"
+          if [ -n "$url" ]; then
+            echo -e "     ${BLUE}$url${NC}"
+          fi
           ;;
-        "pending")
+        "PENDING"|"QUEUED"|"IN_PROGRESS"|"WAITING"|"REQUESTED"|"STARTUP_FAILURE")
           echo -e "${YELLOW}WAIT${NC} $name - running..."
           ;;
+        "NEUTRAL"|"SKIPPED"|"STALE")
+          echo -e "${YELLOW}SKIP${NC} $name - $state"
+          ;;
         *)
-          echo -e "${YELLOW}????${NC} $name - $status"
+          echo -e "${YELLOW}????${NC} $name - $state"
           ;;
       esac
-    done <<< "$PR_CHECKS"
+    done
 
-    if echo "$PR_CHECKS" | grep -q "fail"; then
+    local has_fail has_pending
+    has_fail=$(echo "$pr_json" | jq '[.[] | select(.state == "FAILURE" or .state == "ERROR")] | length')
+    has_pending=$(echo "$pr_json" | jq '[.[] | select(.state == "PENDING" or .state == "QUEUED" or .state == "IN_PROGRESS" or .state == "WAITING" or .state == "REQUESTED")] | length')
+
+    if [ "$has_fail" -gt 0 ] && [ "$has_pending" -eq 0 ]; then
       echo ""
       echo -e "${RED}Some checks failed${NC}"
       echo ""
       echo "Failure logs:"
       echo "==============="
-      gh run view --log-failed 2>/dev/null || true
+      local fail_run_id
+      fail_run_id=$(gh run list --branch "$BRANCH" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null) || true
+      if [ -n "$fail_run_id" ]; then
+        gh run view "$fail_run_id" --log-failed 2>/dev/null || true
+      fi
       return 1
-    elif echo "$PR_CHECKS" | grep -q "pending"; then
+    elif [ "$has_pending" -gt 0 ]; then
       echo ""
       echo -e "${YELLOW}Checks still running...${NC}"
       return 0
@@ -175,6 +194,9 @@ show_ci_status && rc=$? || rc=$?
 if [ $rc -eq 2 ]; then
   exit 0
 fi
+if [ $rc -eq 1 ]; then
+  exit 1
+fi
 
 # Watch loop
 while true; do
@@ -185,7 +207,7 @@ while true; do
       exit 0
       ;;
     1)
-      # Some checks failed, continue watching
+      exit 1
       ;;
     0)
       # Checks still running, continue watching
