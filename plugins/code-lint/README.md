@@ -40,6 +40,7 @@ Full-project lint (includes whole-project-only linters like brakeman and clippy)
 | Markdown | [markdownlint](https://github.com/DavidAnson/markdownlint) | markdownlint --fix | via markdownlint-cli |
 | HTML | [htmlhint](https://github.com/htmlhint/HTMLHint), [prettier](https://github.com/prettier/prettier) | prettier --write | prettier also handles CSS |
 | Shell | [shellcheck](https://github.com/koalaman/shellcheck) | | static analysis for sh/bash/zsh |
+| Any | [semgrep](https://github.com/semgrep/semgrep) | semgrep --autofix | language-agnostic SAST; `/lint` only by default |
 
 ## Hook Behavior
 
@@ -79,6 +80,17 @@ The PostToolUse hook fires on every Edit/Write and:
       }
     }
   },
+  "tool_linters": {
+    "semgrep": {
+      "enabled": true,
+      "command": "semgrep scan --quiet",
+      "autofix_command": "semgrep scan --autofix --quiet",
+      "rulesets": ["p/default"],
+      "exclude_patterns": ["node_modules/", "vendor/", ".venv/", "dist/", "build/"],
+      "timeout": 120,
+      "hook_mode": "off"
+    }
+  },
   "hook_settings": {
     "stop_on_first_failure": false,
     "autofix_before_lint": true,
@@ -86,6 +98,12 @@ The PostToolUse hook fires on every Edit/Write and:
   }
 }
 ```
+
+### hook_mode options
+
+Tool linters support a `hook_mode` field:
+- `"off"` (default) — only runs via `/lint`
+- `"per-file"` — runs on each edited file in the PostToolUse hook (slower, use with caution)
 
 ## Reference Docs
 

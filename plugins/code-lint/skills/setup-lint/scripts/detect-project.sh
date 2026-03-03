@@ -235,11 +235,39 @@ detect_linters() {
   esac
 }
 
+# Detect tool linters (language-agnostic SAST tools)
+detect_tool_linters() {
+  local tool_linters="{}"
+
+  # Semgrep
+  local semgrep_available=false semgrep_config=""
+  if cmd_exists semgrep; then
+    semgrep_available=true
+  fi
+  [[ -f .semgrep.yml ]] && semgrep_config=".semgrep.yml"
+  [[ -f .semgrep.yaml ]] && semgrep_config=".semgrep.yaml"
+  [[ -d .semgrep ]] && semgrep_config=".semgrep/"
+
+  tool_linters=$(jq -n \
+    --argjson available "$semgrep_available" \
+    --arg config "$semgrep_config" \
+    '{
+      "semgrep": {
+        "available": $available,
+        "config": $config,
+        "command": "semgrep scan --quiet",
+        "autofix_command": "semgrep scan --autofix --quiet"
+      }
+    }')
+
+  echo "$tool_linters"
+}
+
 # Main output — build JSON with jq to ensure validity
 mapfile -t LANGUAGES < <(detect_languages)
 
 # Start with base object
-RESULT=$(jq -n --arg dir "$PROJECT_DIR" '{"project_dir": $dir, "languages": {}}')
+RESULT=$(jq -n --arg dir "$PROJECT_DIR" '{"project_dir": $dir, "languages": {}, "tool_linters": {}}')
 
 for LANG_NAME in "${LANGUAGES[@]}"; do
   # Skip empty entries (can happen if detect_languages outputs blank lines)
@@ -247,5 +275,9 @@ for LANG_NAME in "${LANGUAGES[@]}"; do
   LINTER_JSON=$(detect_linters "$LANG_NAME")
   RESULT=$(echo "$RESULT" | jq --arg lang "$LANG_NAME" --argjson linters "$LINTER_JSON" '.languages[$lang] = $linters')
 done
+
+# Add tool linters
+TOOL_LINTERS_JSON=$(detect_tool_linters)
+RESULT=$(echo "$RESULT" | jq --argjson tools "$TOOL_LINTERS_JSON" '.tool_linters = $tools')
 
 echo "$RESULT" | jq .
