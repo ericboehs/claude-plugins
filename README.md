@@ -106,6 +106,15 @@ Wait for GitHub Copilot PR reviews, address feedback, resolve threads, and push 
 
 **Requires:** `gh` (GitHub CLI), `jq`
 
+### watch-ci
+
+Monitor GitHub Actions CI status for the current branch, auto-exiting when checks pass or fail. See [full documentation](plugins/watch-ci/README.md).
+
+**Usage:**
+- `/watch-ci` — Watch CI checks, exit on pass/fail
+
+**Requires:** `gh` (GitHub CLI), `jq`
+
 ### git-utils
 
 Git workflow utilities — merge PRs, clean up branches, and handle worktrees in one command. See [full documentation](plugins/git-utils/README.md).

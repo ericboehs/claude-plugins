@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+
+# Script to watch CI status for the current branch
+# Usage: watch-ci.sh [-h|--help] [interval_seconds]
+# Default interval: 10s (minimum: 5s)
+
+if [[ "${1:-}" == "-h" ]] || [[ "${1:-}" == "--help" ]]; then
+  echo "Usage: $(basename "$0") [interval_seconds]"
+  echo ""
+  echo "Watch GitHub Actions CI status for the current branch."
+  echo "Polls until all checks pass or fail, then exits."
+  echo ""
+  echo "  interval_seconds  Polling interval in seconds (default: 10, minimum: 5)"
+  exit 0
+fi
+
+INTERVAL=${1:-10}
+
+if ! [[ "$INTERVAL" =~ ^[0-9]+$ ]]; then
+  echo "Error: interval must be a positive integer, got '$INTERVAL'"
+  exit 1
+fi
+
+if [ "$INTERVAL" -lt 5 ]; then
+  echo "Warning: Interval too low ($INTERVAL), using minimum of 5 seconds"
+  INTERVAL=5
+fi
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m'
+
+clear_screen() {
+  printf "\033[2J\033[H"
+}
+
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+  echo "Not in a git repository"
+  exit 1
+fi
+
+if ! command -v gh >/dev/null 2>&1; then
+  echo "GitHub CLI (gh) not found. Install with: brew install gh"
+  exit 1
+fi
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "jq not found. Install with: brew install jq"
+  exit 1
+fi
+
+BRANCH=$(git branch --show-current)
+if [ -z "$BRANCH" ]; then
+  echo "Not on a branch (detached HEAD)"
+  exit 1
+fi
+
+echo -e "Watching CI for branch: ${BLUE}$BRANCH${NC}"
+echo "Refresh interval: ${INTERVAL}s (press Ctrl+C to stop)"
+echo ""
+
+# Returns: 0 = checks still running, 1 = failure detected, 2 = all checks passed
+show_ci_status() {
+  local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+
+  clear_screen
+  echo -e "CI Status for branch: ${BLUE}$BRANCH${NC}"
+  echo "Last updated: $timestamp (refreshing every ${INTERVAL}s)"
+  echo "Press Ctrl+C to stop watching"
+  echo ""
+
+  # Try to get PR checks first (use JSON for reliable parsing)
+  local pr_json
+  pr_json=$(gh pr checks --json name,state,completedAt,detailsUrl 2>/dev/null) || true
+  if [ -n "$pr_json" ] && [ "$pr_json" != "[]" ]; then
+    echo "CI Check Results:"
+    echo "===================="
+
+    echo "$pr_json" | jq -r '.[] | "\(.name)\t\(.state)\t\(.detailsUrl // "")"' | while IFS=$'\t' read -r name state url; do
+      case "$state" in
+        "SUCCESS")
+          echo -e "${GREEN}PASS${NC} $name"
+          ;;
+        "FAILURE"|"ERROR")
+          echo -e "${RED}FAIL${NC} $name"
+          if [ -n "$url" ]; then
+            echo -e "     ${BLUE}$url${NC}"
+          fi
+          ;;
+        "PENDING"|"QUEUED"|"IN_PROGRESS"|"WAITING"|"REQUESTED"|"STARTUP_FAILURE")
+          echo -e "${YELLOW}WAIT${NC} $name - running..."
+          ;;
+        "NEUTRAL"|"SKIPPED"|"STALE")
+          echo -e "${YELLOW}SKIP${NC} $name - $state"
+          ;;
+        *)
+          echo -e "${YELLOW}????${NC} $name - $state"
+          ;;
+      esac
+    done
+
+    local has_fail has_pending
+    has_fail=$(echo "$pr_json" | jq '[.[] | select(.state == "FAILURE" or .state == "ERROR")] | length')
+    has_pending=$(echo "$pr_json" | jq '[.[] | select(.state == "PENDING" or .state == "QUEUED" or .state == "IN_PROGRESS" or .state == "WAITING" or .state == "REQUESTED")] | length')
+
+    if [ "$has_fail" -gt 0 ] && [ "$has_pending" -eq 0 ]; then
+      echo ""
+      echo -e "${RED}Some checks failed${NC}"
+      echo ""
+      echo "Failure logs:"
+      echo "==============="
+      local fail_run_id
+      fail_run_id=$(gh run list --branch "$BRANCH" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null) || true
+      if [ -n "$fail_run_id" ]; then
+        gh run view "$fail_run_id" --log-failed 2>/dev/null || true
+      fi
+      return 1
+    elif [ "$has_pending" -gt 0 ]; then
+      echo ""
+      echo -e "${YELLOW}Checks still running...${NC}"
+      return 0
+    else
+      echo ""
+      echo -e "${GREEN}All checks passed!${NC}"
+      return 2
+    fi
+  else
+    # No PR found, check workflow runs for the branch directly
+    echo "CI Workflow Status (latest run on $BRANCH):"
+    echo "=============================================="
+
+    RUN_ID=$(gh run list --branch "$BRANCH" --limit 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null) || true
+
+    if [ -z "$RUN_ID" ]; then
+      echo "No CI runs found for branch $BRANCH"
+      echo "Make sure you've pushed your branch"
+      return 0
+    fi
+
+    RUN_INFO=$(gh run view "$RUN_ID" --json status,conclusion,jobs 2>/dev/null) || true
+    if [ -z "$RUN_INFO" ]; then
+      echo "Could not fetch run info"
+      return 0
+    fi
+
+    RUN_STATUS=$(echo "$RUN_INFO" | jq -r '.status')
+    RUN_CONCLUSION=$(echo "$RUN_INFO" | jq -r '.conclusion')
+
+    echo "$RUN_INFO" | jq -r '.jobs[] | "\(.name)\t\(.status)\t\(.conclusion)"' | while IFS=$'\t' read -r name status conclusion; do
+      if [ "$status" = "completed" ]; then
+        case "$conclusion" in
+          "success")
+            echo -e "${GREEN}PASS${NC} $name"
+            ;;
+          "failure")
+            echo -e "${RED}FAIL${NC} $name"
+            ;;
+          "cancelled")
+            echo -e "${YELLOW}SKIP${NC} $name - cancelled"
+            ;;
+          *)
+            echo -e "${YELLOW}????${NC} $name - $conclusion"
+            ;;
+        esac
+      else
+        echo -e "${YELLOW}WAIT${NC} $name - $status..."
+      fi
+    done
+
+    echo ""
+    if [ "$RUN_STATUS" = "completed" ]; then
+      if [ "$RUN_CONCLUSION" = "success" ]; then
+        echo -e "${GREEN}All jobs passed!${NC}"
+        return 2
+      else
+        echo -e "${RED}Workflow $RUN_CONCLUSION${NC}"
+        echo ""
+        echo "Failure logs:"
+        echo "==============="
+        gh run view "$RUN_ID" --log-failed 2>/dev/null || true
+        return 1
+      fi
+    else
+      echo -e "${YELLOW}Workflow still running...${NC}"
+      return 0
+    fi
+  fi
+}
+
+# Initial display
+show_ci_status && rc=$? || rc=$?
+if [ $rc -eq 2 ]; then
+  exit 0
+fi
+if [ $rc -eq 1 ]; then
+  exit 1
+fi
+
+# Watch loop
+while true; do
+  sleep "$INTERVAL"
+  show_ci_status && rc=$? || rc=$?
+  case $rc in
+    2)
+      exit 0
+      ;;
+    1)
+      exit 1
+      ;;
+    0)
+      # Checks still running, continue watching
+      ;;
+  esac
+done
