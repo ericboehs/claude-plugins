@@ -13,11 +13,13 @@ Run configured linters across the full project. Includes whole-project-only lint
 - `/lint` — Run all enabled linters on the full project
 - `/lint ruby` — Run only Ruby linters
 - `/lint reek` — Run only the reek linter
+- `/lint semgrep` — Run only Semgrep (tool linter)
 - `/lint --fix` — Run autofix on all files first, then lint
 
 Arguments after `/lint` are parsed as:
 - A language name (ruby, javascript, python, go, rust, markdown, html, shell) → filter to that language
 - A linter name (rubocop, reek, eslint, ruff, etc.) → filter to that specific linter
+- A tool linter name (semgrep) → filter to that tool linter
 - `--fix` → run autofix commands before linting
 
 ## Step 1: Load Config
@@ -66,6 +68,31 @@ Run these against the project root:
 cd "$PROJECT_DIR"
 bundle exec brakeman -q
 cargo clippy -- -D warnings
+```
+
+### Tool linters (e.g. Semgrep)
+
+After running per-language linters, check the `tool_linters` section of the config. For each enabled tool linter:
+
+If the argument to `/lint` matches a tool linter name (e.g. `/lint semgrep`), run only that tool linter.
+
+For Semgrep, build the command with configured rulesets:
+
+```bash
+cd "$PROJECT_DIR"
+
+# Build --config flags from rulesets array
+# e.g. rulesets: ["p/default", "p/security-audit"] → --config p/default --config p/security-audit
+semgrep scan --quiet --config p/default --config p/security-audit .
+
+# With --fix mode:
+semgrep scan --autofix --quiet --config p/default .
+```
+
+Respect `exclude_patterns` — pass each value as a `--exclude` flag (these are path prefixes/globs, not regex):
+
+```bash
+semgrep scan --quiet --config p/default --exclude "node_modules/" --exclude "vendor/" .
 ```
 
 ### Collect results
@@ -124,6 +151,7 @@ Read the relevant reference docs for fix patterns:
 - Markdown: `${CLAUDE_PLUGIN_ROOT}/references/markdown-patterns.md`
 - HTML: `${CLAUDE_PLUGIN_ROOT}/references/html-patterns.md`
 - Shell: `${CLAUDE_PLUGIN_ROOT}/references/shell-patterns.md`
+- Semgrep: `${CLAUDE_PLUGIN_ROOT}/references/semgrep-patterns.md`
 
 If `CLAUDE_PLUGIN_ROOT` is not set, find references relative to this SKILL.md (two directories up: `../../references/`).
 

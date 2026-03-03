@@ -67,6 +67,17 @@ For each detected language, use AskUserQuestion to confirm:
 - Enable: shellcheck
 - Exclude: `node_modules/`, `vendor/`
 
+### Tool linters (language-agnostic)
+
+After the per-language interview, check for tool linters detected in the JSON output (`tool_linters` key).
+
+**Semgrep** (if detected as available):
+1. **Enable Semgrep?** "Semgrep (language-agnostic SAST scanner) is available. Enable it?"
+2. **Rulesets:** "Which rulesets? (default: `p/default`). Other options: `p/security-audit`, `p/owasp-top-ten`, or a local `.semgrep.yml` if present."
+3. **Hook mode:** "Run Semgrep in the PostToolUse hook (per-file) or only via `/lint`? (default: `/lint` only — recommended, as per-file scanning is slow)"
+
+If Semgrep is not installed, note it and suggest: `pip install semgrep` or `brew install semgrep`.
+
 ### Hook settings (ask once)
 
 - **Stop on first failure:** false (default) — run all linters and aggregate
@@ -108,6 +119,17 @@ Write config to `$CONFIG_DIR/config.json` using the schema below. Only include l
       }
     }
   },
+  "tool_linters": {
+    "semgrep": {
+      "enabled": true,
+      "command": "semgrep scan --quiet",
+      "autofix_command": "semgrep scan --autofix --quiet",
+      "rulesets": ["p/default"],
+      "exclude_patterns": ["node_modules/", "vendor/", ".venv/", "dist/", "build/"],
+      "timeout": 120,
+      "hook_mode": "off"
+    }
+  },
   "hook_settings": {
     "stop_on_first_failure": false,
     "autofix_before_lint": true,
@@ -115,6 +137,16 @@ Write config to `$CONFIG_DIR/config.json` using the schema below. Only include l
   }
 }
 ```
+
+#### tool_linters fields
+
+- **enabled**: Whether the tool linter is active
+- **command**: The lint command (file path appended in hook mode, runs on `.` in `/lint` mode)
+- **autofix_command**: Optional autofix variant
+- **rulesets**: Semgrep-specific — list of ruleset IDs (e.g. `p/default`, `p/security-audit`)
+- **exclude_patterns**: Path prefixes to skip (matched as substrings in hook mode; passed as `--exclude` glob flags in `/lint` mode)
+- **timeout**: Seconds before the command is killed (default: 120)
+- **hook_mode**: `"off"` (only runs via `/lint`) or `"per-file"` (runs in PostToolUse hook on each edited file)
 
 #### File patterns by language
 

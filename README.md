@@ -95,7 +95,7 @@ Multi-language linting via PostToolUse hooks. Automatically runs configured lint
 - `/setup-lint` — Detect languages and linters, configure per-project linting
 - `/lint` — Run all configured linters across the full project
 
-**Supported:** Ruby (rubocop, reek, brakeman), JS/TS (eslint, biome), Python (ruff, mypy, flake8), Go (golangci-lint), Rust (clippy), Markdown (markdownlint), HTML (htmlhint, prettier), Shell (shellcheck)
+**Supported:** Ruby (rubocop, reek, brakeman), JS/TS (eslint, biome), Python (ruff, mypy, flake8), Go (golangci-lint), Rust (clippy), Markdown (markdownlint), HTML (htmlhint, prettier), Shell (shellcheck), Any (semgrep — language-agnostic SAST)
 
 ### gh-copilot-review
 
