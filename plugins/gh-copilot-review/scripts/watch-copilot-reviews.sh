@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Script to watch for Copilot code reviews on a PR
 # Usage: watch-copilot-reviews [pr_number] [interval_seconds]

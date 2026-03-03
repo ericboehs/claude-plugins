@@ -4,6 +4,8 @@ description: Wait for a GitHub Copilot review on the current branch's PR, addres
 tools: Bash, Read, Edit, Write
 ---
 
+# gh-copilot-review
+
 Wait for a GitHub Copilot review on the current branch's PR, address all feedback, and push fixes.
 
 ## Steps
