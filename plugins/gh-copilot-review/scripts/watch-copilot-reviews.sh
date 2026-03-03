@@ -1,0 +1,225 @@
+#!/bin/bash
+
+# Script to watch for Copilot code reviews on a PR
+# Usage: watch-copilot-reviews [pr_number] [interval_seconds]
+# If no PR number given, uses the PR for the current branch.
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+DIM='\033[2m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+# Clear screen function
+clear_screen() {
+  printf "\033[2J\033[H"
+}
+
+# Check prerequisites
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+  echo "❌ Not in a git repository"
+  exit 1
+fi
+
+if ! command -v gh >/dev/null 2>&1; then
+  echo "❌ GitHub CLI (gh) not found. Install with: brew install gh"
+  exit 1
+fi
+
+if ! command -v jq >/dev/null 2>&1; then
+  echo "❌ jq not found. Install with: brew install jq"
+  exit 1
+fi
+
+# Parse arguments - support PR number and/or interval
+PR_NUMBER=""
+INTERVAL=10
+
+for arg in "$@"; do
+  if [[ "$arg" =~ ^[0-9]+$ ]]; then
+    if [ -z "$PR_NUMBER" ]; then
+      PR_NUMBER="$arg"
+    else
+      INTERVAL="$arg"
+    fi
+  fi
+done
+
+# If no PR number, find PR for current branch
+if [ -z "$PR_NUMBER" ]; then
+  BRANCH=$(git branch --show-current)
+  if [ -z "$BRANCH" ]; then
+    echo "❌ Not on a branch (detached HEAD). Pass a PR number instead."
+    exit 1
+  fi
+  PR_NUMBER=$(gh pr view "$BRANCH" --json number --jq '.number' 2>/dev/null) || true
+  if [ -z "$PR_NUMBER" ]; then
+    echo "❌ No PR found for branch: $BRANCH"
+    echo "💡 Pass a PR number: watch-copilot-reviews 30"
+    exit 1
+  fi
+fi
+
+# Get repo info
+REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
+
+echo -e "🤖 Watching Copilot reviews for ${BLUE}${REPO}#${PR_NUMBER}${NC}"
+echo "⏱️  Refresh interval: ${INTERVAL}s (press Ctrl+C to stop)"
+echo ""
+
+# Function to display review status
+show_review_status() {
+  local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+
+  clear_screen
+  echo -e "🤖 Copilot Review Status for ${BLUE}${REPO}#${PR_NUMBER}${NC}"
+  echo "⏱️  Last updated: $timestamp (refreshing every ${INTERVAL}s)"
+  echo "📝 Press Ctrl+C to stop watching"
+  echo ""
+
+  # Check if Copilot is in requested reviewers (pending re-review).
+  # Must check FIRST — if pending, we wait even if old reviews exist.
+  local pending
+  pending=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/requested_reviewers" --jq '.users[] | select(.login | test("copilot"; "i")) | .login' 2>/dev/null) || true
+
+  if [ -n "$pending" ]; then
+    # Copilot is still in requested reviewers — wait for the new review
+    echo -e "${YELLOW}⏳ Copilot review pending...${NC}"
+    echo ""
+    echo -e "  Copilot is still analyzing the PR. This typically takes 1-3 minutes."
+
+    # Check if there's a copilot agent session running
+    local check_runs
+    check_runs=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/commits" --jq '.[0].sha' 2>/dev/null) || true
+    if [ -n "$check_runs" ]; then
+      local copilot_status
+      copilot_status=$(gh api "repos/${REPO}/commits/${check_runs}/check-runs" --jq '.check_runs[] | select(.app.slug == "copilot-pull-request-review" or .name == "Copilot") | "\(.status)\t\(.conclusion // "pending")"' 2>/dev/null) || true
+      if [ -n "$copilot_status" ]; then
+        echo ""
+        echo -e "  Agent status: ${CYAN}$copilot_status${NC}"
+      fi
+    fi
+
+    return 0
+  fi
+
+  # Not pending — check for submitted reviews
+  local reviews
+  reviews=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/reviews" --jq '[.[] | select(.user.login | test("copilot"; "i"))]' 2>/dev/null) || true
+  local review_count
+  review_count=$(echo "$reviews" | jq 'length' 2>/dev/null) || review_count=0
+
+  if [ "$review_count" -gt 0 ]; then
+    # Show only the latest review (most relevant after re-requests)
+    local latest_index=$((review_count - 1))
+
+    echo -e "${GREEN}✅ Copilot review received!${NC}"
+    echo ""
+
+    local state submitted_at body
+    state=$(echo "$reviews" | jq -r ".[$latest_index].state")
+    submitted_at=$(echo "$reviews" | jq -r ".[$latest_index].submitted_at")
+    body=$(echo "$reviews" | jq -r ".[$latest_index].body // \"\"")
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    case "$state" in
+      "APPROVED")
+        echo -e "  ${GREEN}${BOLD}✅ APPROVED${NC}  ${DIM}($submitted_at)${NC}"
+        ;;
+      "CHANGES_REQUESTED")
+        echo -e "  ${RED}${BOLD}🔄 CHANGES REQUESTED${NC}  ${DIM}($submitted_at)${NC}"
+        ;;
+      "COMMENTED")
+        echo -e "  ${YELLOW}${BOLD}💬 COMMENTED${NC}  ${DIM}($submitted_at)${NC}"
+        ;;
+      *)
+        echo -e "  ${YELLOW}${BOLD}❓ $state${NC}  ${DIM}($submitted_at)${NC}"
+        ;;
+    esac
+
+    if [ -n "$body" ]; then
+      echo ""
+      echo "$body" | fold -s -w 80 | sed 's/^/  /'
+    fi
+    echo ""
+
+    if [ "$review_count" -gt 1 ]; then
+      echo -e "  ${DIM}(Showing latest of $review_count reviews)${NC}"
+      echo ""
+    fi
+
+    # Show review comments from the latest review
+    local latest_review_id
+    latest_review_id=$(echo "$reviews" | jq -r ".[$latest_index].id")
+    local comments
+    comments=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/comments" --jq "[.[] | select(.user.login | test(\"copilot\"; \"i\")) | select(.pull_request_review_id == $latest_review_id)]" 2>/dev/null) || true
+    local comment_count
+    comment_count=$(echo "$comments" | jq 'length' 2>/dev/null) || comment_count=0
+
+    if [ "$comment_count" -gt 0 ]; then
+      echo -e "${CYAN}${BOLD}📝 Inline Comments ($comment_count):${NC}"
+      echo ""
+
+      local j=0
+      while [ "$j" -lt "$comment_count" ]; do
+        local path line cbody
+        path=$(echo "$comments" | jq -r ".[$j].path // \"unknown\"")
+        line=$(echo "$comments" | jq -r ".[$j].line // .[$j].original_line // \"?\"")
+        cbody=$(echo "$comments" | jq -r ".[$j].body // \"\"")
+
+        echo -e "  ${BLUE}$path${NC}:${YELLOW}$line${NC}"
+        # Strip code suggestion blocks for cleaner terminal output
+        echo "$cbody" | sed '/^```suggestion/,/^```$/d' | fold -s -w 76 | sed 's/^/    /'
+        echo ""
+        j=$((j + 1))
+      done
+    fi
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo -e "🔗 ${BLUE}https://github.com/${REPO}/pull/${PR_NUMBER}${NC}"
+    echo ""
+    echo "🎉 Exiting since Copilot review is complete"
+    return 2
+
+  else
+    # No pending request and no reviews - Copilot wasn't requested
+    echo -e "${YELLOW}🔄 No Copilot review request found — requesting one...${NC}"
+    if gh pr edit "$PR_NUMBER" --add-reviewer @copilot >/dev/null 2>&1; then
+      echo -e "  ${GREEN}✅ Added @copilot as reviewer${NC}"
+    else
+      echo -e "  ${RED}❌ Failed to add @copilot as reviewer${NC}"
+      echo -e "  💡 Try manually: ${CYAN}gh pr edit $PR_NUMBER --add-reviewer @copilot${NC}"
+    fi
+    return 0
+  fi
+}
+
+# Initial display
+show_review_status && rc=$? || rc=$?
+if [ $rc -eq 2 ]; then
+  exit 0
+fi
+
+# Watch loop
+while true; do
+  sleep "$INTERVAL"
+  show_review_status && rc=$? || rc=$?
+  case $rc in
+    2)
+      exit 0
+      ;;
+    1)
+      # Error, continue watching
+      ;;
+    0)
+      # Still pending, continue watching
+      ;;
+  esac
+done

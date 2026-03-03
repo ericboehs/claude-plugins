@@ -97,6 +97,15 @@ Multi-language linting via PostToolUse hooks. Automatically runs configured lint
 
 **Supported:** Ruby (rubocop, reek, brakeman), JS/TS (eslint, biome), Python (ruff, mypy, flake8), Go (golangci-lint), Rust (clippy), Markdown (markdownlint), HTML (htmlhint, prettier), Shell (shellcheck)
 
+### gh-copilot-review
+
+Wait for GitHub Copilot PR reviews, address feedback, resolve threads, and push fixes. See [full documentation](plugins/gh-copilot-review/README.md).
+
+**Usage:**
+- `/gh-copilot-review` — Wait for Copilot review, apply fixes, resolve threads, commit and push
+
+**Requires:** `gh` (GitHub CLI), `jq`
+
 ### git-utils
 
 Git workflow utilities — merge PRs, clean up branches, and handle worktrees in one command. See [full documentation](plugins/git-utils/README.md).
