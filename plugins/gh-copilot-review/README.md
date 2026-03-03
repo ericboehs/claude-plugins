@@ -25,4 +25,4 @@ Wait for GitHub Copilot PR reviews, address feedback, resolve threads, and push 
 
 ## Included scripts
 
-- `scripts/watch-copilot-reviews.sh` — standalone script that monitors Copilot review status, supports custom PR numbers and poll intervals
+- `scripts/watch-copilot-reviews.sh` — standalone script that monitors Copilot review status, auto-requests @copilot if needed, supports custom PR numbers and poll intervals

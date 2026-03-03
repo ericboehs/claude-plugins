@@ -10,19 +10,26 @@ Wait for a GitHub Copilot review on the current branch's PR, address all feedbac
 
 ### 1. Wait for Copilot review
 
-Run `$PLUGIN_DIR/scripts/watch-copilot-reviews.sh` and wait for it to exit. It auto-detects the PR from the current branch. If @copilot hasn't been requested yet, it adds @copilot as a reviewer automatically. It polls until the review is submitted, then exits.
+Run `${CLAUDE_PLUGIN_ROOT}/scripts/watch-copilot-reviews.sh` and wait for it to exit. It auto-detects the PR from the current branch. If @copilot hasn't been requested yet, it adds @copilot as a reviewer automatically. It polls until the review is submitted, then exits.
+
+If `CLAUDE_PLUGIN_ROOT` is not set, find the script relative to this SKILL.md (`../../scripts/watch-copilot-reviews.sh`).
 
 ### 2. Fetch Copilot's inline comments
 
-Get the repo owner/name and PR number:
+Store the repo name and PR number in variables:
 ```
-gh repo view --json nameWithOwner --jq '.nameWithOwner'
-gh pr view --json number --jq '.number'
+REPO=$(gh repo view --json nameWithOwner --jq '.nameWithOwner')
+PR_NUMBER=$(gh pr view --json number --jq '.number')
 ```
 
-Fetch all PR review comments from Copilot:
+First, get the latest Copilot review ID so we only address current feedback (not old, already-resolved reviews):
 ```
-gh api "repos/{owner}/{repo}/pulls/{pr_number}/comments" --jq '[.[] | select(.user.login | test("copilot"; "i"))]'
+LATEST_REVIEW_ID=$(gh api "repos/$REPO/pulls/$PR_NUMBER/reviews" --jq '[.[] | select(.user.login | test("copilot"; "i"))] | last | .id')
+```
+
+Then fetch only the comments from that review:
+```
+gh api "repos/$REPO/pulls/$PR_NUMBER/comments" --jq "[.[] | select(.user.login | test(\"copilot\"; \"i\")) | select(.pull_request_review_id == $LATEST_REVIEW_ID)]"
 ```
 
 For each comment, extract: `id`, `node_id`, `path`, `line` (fall back to `original_line`), `body`, and any ` ```suggestion ` code blocks.
@@ -39,19 +46,22 @@ For each inline comment:
 
 For each comment you addressed, post a reply explaining what was done:
 ```
-gh api "repos/{owner}/{repo}/pulls/{pr_number}/comments/{comment_id}/replies" -f body="Done — applied the suggested change."
+gh api "repos/$REPO/pulls/$PR_NUMBER/comments/$COMMENT_ID/replies" -f body="Done — applied the suggested change."
 ```
 
 Tailor the reply to what you actually did (applied suggestion, made a fix, or explained why no change was needed).
 
 ### 5. Resolve each review thread
 
-First, get the review thread IDs using GraphQL:
+First, get the review thread IDs using GraphQL. Split `$REPO` into owner and name parts:
 ```
+OWNER=$(echo "$REPO" | cut -d/ -f1)
+REPO_NAME=$(echo "$REPO" | cut -d/ -f2)
+
 gh api graphql -f query='
   query {
-    repository(owner: "OWNER", name: "REPO") {
-      pullRequest(number: PR_NUMBER) {
+    repository(owner: "'"$OWNER"'", name: "'"$REPO_NAME"'") {
+      pullRequest(number: '"$PR_NUMBER"') {
         reviewThreads(first: 100) {
           nodes {
             id
@@ -70,11 +80,11 @@ gh api graphql -f query='
 '
 ```
 
-Then resolve each unresolved thread from Copilot:
+Filter to only threads where `comments.nodes[0].author.login` matches Copilot (case-insensitive) and `isResolved` is `false`. Then resolve each one:
 ```
 gh api graphql -f query='
   mutation {
-    resolveReviewThread(input: { threadId: "THREAD_NODE_ID" }) {
+    resolveReviewThread(input: { threadId: "'"$THREAD_NODE_ID"'" }) {
       thread { isResolved }
     }
   }
@@ -84,7 +94,7 @@ gh api graphql -f query='
 ### 6. Commit and push
 
 Stage all changes, commit with a message like `fix: address Copilot review feedback`, and push to origin.
-Do not chain git commands with && as that will prompt the user even for commands they have previously agreed to.
+Do not chain git commands with `&&` — Claude Code treats chained commands as a single compound command, requiring a new permission prompt even if each individual command was previously approved. Run `git add`, `git commit`, and `git push` as separate Bash calls.
 
 ## Important notes
 

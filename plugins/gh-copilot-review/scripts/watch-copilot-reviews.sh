@@ -2,11 +2,8 @@
 
 # Script to watch for Copilot code reviews on a PR
 # Usage: watch-copilot-reviews [pr_number] [interval_seconds]
+# Both args are numeric. A single arg is always the PR number. Default interval: 10s.
 # If no PR number given, uses the PR for the current branch.
-
-set -e
-
-# Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -42,6 +39,17 @@ PR_NUMBER=""
 INTERVAL=10
 
 for arg in "$@"; do
+  if [[ "$arg" == "-h" ]] || [[ "$arg" == "--help" ]]; then
+    echo "Usage: $(basename "$0") [pr_number] [interval_seconds]"
+    echo ""
+    echo "Watch for GitHub Copilot code reviews on a pull request."
+    echo "Both arguments are numeric. A single argument is always the PR number."
+    echo "If no PR number is given, uses the PR for the current branch."
+    echo ""
+    echo "  pr_number         PR number to watch (default: current branch's PR)"
+    echo "  interval_seconds  Polling interval in seconds (default: 10, minimum: 5)"
+    exit 0
+  fi
   if [[ "$arg" =~ ^[0-9]+$ ]]; then
     if [ -z "$PR_NUMBER" ]; then
       PR_NUMBER="$arg"
@@ -50,6 +58,11 @@ for arg in "$@"; do
     fi
   fi
 done
+
+if [ "$INTERVAL" -lt 5 ]; then
+  echo "⚠️  Interval too low ($INTERVAL), using minimum of 5 seconds"
+  INTERVAL=5
+fi
 
 # If no PR number, find PR for current branch
 if [ -z "$PR_NUMBER" ]; then
@@ -95,11 +108,11 @@ show_review_status() {
     echo -e "  Copilot is still analyzing the PR. This typically takes 1-3 minutes."
 
     # Check if there's a copilot agent session running
-    local check_runs
-    check_runs=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/commits" --jq '.[0].sha' 2>/dev/null) || true
-    if [ -n "$check_runs" ]; then
+    local head_sha
+    head_sha=$(gh pr view "$PR_NUMBER" --json headRefOid --jq '.headRefOid' 2>/dev/null) || true
+    if [ -n "$head_sha" ]; then
       local copilot_status
-      copilot_status=$(gh api "repos/${REPO}/commits/${check_runs}/check-runs" --jq '.check_runs[] | select(.app.slug == "copilot-pull-request-review" or .name == "Copilot") | "\(.status)\t\(.conclusion // "pending")"' 2>/dev/null) || true
+      copilot_status=$(gh api "repos/${REPO}/commits/${head_sha}/check-runs" --jq '.check_runs[] | select(.app.slug == "copilot-pull-request-review" or .name == "Copilot") | "\(.status)\t\(.conclusion // "pending")"' 2>/dev/null) || true
       if [ -n "$copilot_status" ]; then
         echo ""
         echo -e "  Agent status: ${CYAN}$copilot_status${NC}"
