@@ -261,14 +261,32 @@ for TOOL in $TOOL_LINTERS; do
     continue
   fi
 
+  # Append --config flags from rulesets array (e.g. semgrep needs --config p/default)
+  RULESETS=$(jq -r ".tool_linters[\"${TOOL}\"].rulesets // [] | .[]" "$CONFIG_FILE" 2>/dev/null || true)
+  CONFIG_FLAGS=""
+  for RS in $RULESETS; do
+    CONFIG_FLAGS="${CONFIG_FLAGS} --config ${RS}"
+  done
+  if [[ -n "$CONFIG_FLAGS" ]]; then
+    TOOL_COMMAND="${TOOL_COMMAND}${CONFIG_FLAGS}"
+    [[ -n "$TOOL_AUTOFIX" ]] && TOOL_AUTOFIX="${TOOL_AUTOFIX}${CONFIG_FLAGS}"
+  fi
+
   # Run autofix first if configured
   if [[ "$AUTOFIX_BEFORE_LINT" == "true" ]] && [[ -n "$TOOL_AUTOFIX" ]]; then
     cd "$PROJECT_DIR" || continue
     AUTOFIX_OUTPUT=""
     AUTOFIX_OUTPUT=$(run_with_timeout "${TOOL_TIMEOUT}s" "$TOOL_AUTOFIX" "$FILE_PATH") || {
       AUTOFIX_EXIT=$?
-      if [[ $AUTOFIX_EXIT -ne 0 ]] && [[ -n "$AUTOFIX_OUTPUT" ]]; then
+      if [[ $AUTOFIX_EXIT -eq 124 ]]; then
+        ERRORS="${ERRORS}\n[${TOOL}/autofix] Timed out after ${TOOL_TIMEOUT}s\n"
+        HAD_FAILURE=1
+      elif [[ -n "$AUTOFIX_OUTPUT" ]]; then
         ERRORS="${ERRORS}\n[${TOOL}/autofix] ${AUTOFIX_OUTPUT}\n"
+        HAD_FAILURE=1
+      else
+        ERRORS="${ERRORS}\n[${TOOL}/autofix] Exited with status ${AUTOFIX_EXIT} (no output)\n"
+        HAD_FAILURE=1
       fi
     }
   fi

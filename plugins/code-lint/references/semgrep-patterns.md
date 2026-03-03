@@ -8,8 +8,8 @@ Credentials, API keys, or tokens embedded directly in source code. Move them to 
 
 BAD:
 ```python
-API_KEY = "sk-abc123secretkey"
-db_password = "hunter2"
+API_KEY = "EXAMPLE-NOT-A-REAL-KEY"
+db_password = "plaintext-password-here"
 ```
 
 GOOD:

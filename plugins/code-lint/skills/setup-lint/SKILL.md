@@ -144,7 +144,7 @@ Write config to `$CONFIG_DIR/config.json` using the schema below. Only include l
 - **command**: The lint command (file path appended in hook mode, runs on `.` in `/lint` mode)
 - **autofix_command**: Optional autofix variant
 - **rulesets**: Semgrep-specific — list of ruleset IDs (e.g. `p/default`, `p/security-audit`)
-- **exclude_patterns**: Regex patterns for paths to skip
+- **exclude_patterns**: Path prefixes to skip (matched as substrings in hook mode; passed as `--exclude` glob flags in `/lint` mode)
 - **timeout**: Seconds before the command is killed (default: 120)
 - **hook_mode**: `"off"` (only runs via `/lint`) or `"per-file"` (runs in PostToolUse hook on each edited file)
 

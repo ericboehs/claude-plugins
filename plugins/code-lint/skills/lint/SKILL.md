@@ -89,10 +89,10 @@ semgrep scan --quiet --config p/default --config p/security-audit .
 semgrep scan --autofix --quiet --config p/default .
 ```
 
-Respect `exclude_patterns` — pass them as `--exclude` flags:
+Respect `exclude_patterns` — pass each value as a `--exclude` flag (these are path prefixes/globs, not regex):
 
 ```bash
-semgrep scan --quiet --config p/default --exclude node_modules --exclude vendor .
+semgrep scan --quiet --config p/default --exclude "node_modules/" --exclude "vendor/" .
 ```
 
 ### Collect results
