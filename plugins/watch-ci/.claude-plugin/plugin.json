@@ -1,0 +1,9 @@
+{
+  "name": "watch-ci",
+  "version": "1.0.0",
+  "description": "Monitor GitHub Actions CI status for the current branch, auto-exit on pass or fail",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}
