@@ -7,13 +7,13 @@ A collection of Claude Code plugins for developer productivity.
 Add this marketplace to Claude Code:
 
 ```bash
-claude plugins:add-marketplace ericboehs/claude-plugins
+claude plugin marketplace add ericboehs/claude-plugins
 ```
 
 Then install individual plugins:
 
 ```bash
-claude plugins:install session-improver
+claude plugin install session-improver
 ```
 
 ## Plugins
