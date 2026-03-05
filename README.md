@@ -115,6 +115,13 @@ Monitor GitHub Actions CI status for the current branch, auto-exiting when check
 
 **Requires:** `gh` (GitHub CLI), `jq`
 
+### icloud-downloads
+
+Copy files to iCloud Downloads for easy access on iPhone/iPad. See [full documentation](plugins/icloud-downloads/README.md).
+
+**Usage:**
+- `/copy-to-icloud-downloads` — Copy a file to iCloud Downloads for reading on your phone
+
 ### git-utils
 
 Git workflow utilities — merge PRs, clean up branches, and handle worktrees in one command. See [full documentation](plugins/git-utils/README.md).
