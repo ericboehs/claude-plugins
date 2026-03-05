@@ -82,6 +82,17 @@
       },
       "source": "./plugins/git-utils",
       "category": "developer-tools"
+    },
+    {
+      "name": "icloud-downloads",
+      "version": "1.0.0",
+      "description": "Copy files to iCloud Downloads for easy access on iPhone/iPad",
+      "author": {
+        "name": "Eric Boehs",
+        "url": "https://github.com/ericboehs"
+      },
+      "source": "./plugins/icloud-downloads",
+      "category": "productivity"
     }
   ]
 }
