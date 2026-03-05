@@ -136,6 +136,7 @@ Git workflow utilities — merge PRs, clean up branches, and handle worktrees in
 
 **Usage:**
 - `/merge-and-cleanup` — Squash merge the current branch's PR, delete the branch, switch to the default branch, pull, and clean up worktree if applicable
+- `/commit-and-push` — Stage all changes, commit with a semantic message, and push to origin
 
 ## Contributing
 
