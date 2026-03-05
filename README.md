@@ -122,6 +122,14 @@ Copy files to iCloud Downloads for easy access on iPhone/iPad. See [full documen
 **Usage:**
 - `/copy-to-icloud-downloads` — Copy a file to iCloud Downloads for reading on your phone
 
+### gist
+
+Create and update GitHub Gists with auto-generated README comments. See [full documentation](plugins/gist/README.md).
+
+**Usage:**
+- `/gist-create <filepath>` — Create a public gist with a README comment
+- `/gist-update <filepath>` — Update an existing gist and its README comment
+
 ### git-utils
 
 Git workflow utilities — merge PRs, clean up branches, and handle worktrees in one command. See [full documentation](plugins/git-utils/README.md).

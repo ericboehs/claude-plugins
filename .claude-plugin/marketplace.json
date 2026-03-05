@@ -93,6 +93,17 @@
       },
       "source": "./plugins/icloud-downloads",
       "category": "productivity"
+    },
+    {
+      "name": "gist",
+      "version": "1.0.0",
+      "description": "Create and update GitHub Gists with auto-generated README comments",
+      "author": {
+        "name": "Eric Boehs",
+        "url": "https://github.com/ericboehs"
+      },
+      "source": "./plugins/gist",
+      "category": "developer-tools"
     }
   ]
 }
