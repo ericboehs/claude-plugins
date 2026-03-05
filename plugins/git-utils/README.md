@@ -28,3 +28,16 @@ Merge the current branch's PR (squash), delete the remote branch, switch to the 
 - Uncommitted changes — warns before proceeding
 - Failing CI checks — warns and asks before merging
 - Worktree cleanup failures — reports manual cleanup command
+
+### /commit-and-push
+
+Stage all changes, commit with a semantic commit message, and push to origin.
+
+**Usage:**
+- `/commit-and-push` — Stage, commit, and push
+
+**What it does:**
+1. Stages all modified and new files
+2. Asks if any files should be excluded or split into separate commits
+3. Commits with a clear one-line semantic commit message
+4. Pushes to origin
