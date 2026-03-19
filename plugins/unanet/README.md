@@ -1,6 +1,6 @@
 # Unanet Timesheet Manager
 
-Automate Unanet timesheet entry via Playwright browser automation. Logs in through Okta SSO (with TOTP), fills hours, saves, and returns screenshots.
+Automate Unanet timesheet entry and leave requests via Playwright browser automation. Logs in through Okta SSO (with TOTP), fills hours, creates leave requests, saves, and returns screenshots.
 
 ## Prerequisites
 
@@ -59,11 +59,23 @@ unanet view --visible
 
 # Submit timesheet
 unanet submit
+
+# Create a leave request (saves only)
+unanet leave --data '{"begin":"2026-04-03","end":"2026-04-03","hours":8}'
+
+# Create and submit a leave request for approval
+unanet leave --data '{"begin":"2026-04-03","end":"2026-04-03","hours":8,"submit":true}'
+
+# Multi-day leave request with comment
+unanet leave --data '{"begin":"2026-04-03","end":"2026-04-04","hours":16,"comments":"Vacation","submit":true}'
+
+# Preview leave request without saving
+unanet leave --no-save --data '{"begin":"2026-04-03","end":"2026-04-03","hours":8}'
 ```
 
 ## Claude Code Skills
 
-- `/unanet` — Natural language timesheet management ("fill 8 hours EERT for Monday through Friday")
+- `/unanet` — Natural language timesheet and leave management ("fill 8 hours EERT for Monday through Friday", "take off April 3rd")
 - `/setup-unanet` — Interactive setup wizard
 
 ## How It Works
