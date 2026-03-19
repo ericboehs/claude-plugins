@@ -1,12 +1,12 @@
 ---
 name: unanet
-description: Fill timesheets, view time entries, and submit timesheets on Unanet. Use when user asks about timesheets, time entry, logging hours, or says "/unanet".
+description: Fill timesheets, view time entries, submit timesheets, and create leave requests on Unanet. Use when user asks about timesheets, time entry, logging hours, PTO, leave requests, taking time off, or says "/unanet".
 tools: Bash, Read
 ---
 
 # Unanet Timesheet Manager
 
-Manage Unanet timesheets via the `unanet` CLI tool.
+Manage Unanet timesheets and leave requests via the `unanet` CLI tool.
 
 ## Prerequisites
 
@@ -17,6 +17,7 @@ Manage Unanet timesheets via the `unanet` CLI tool.
 - `/unanet` — View current timesheet
 - `/unanet fill 8h EERT for Wednesday and Thursday` — Fill time entries
 - `/unanet submit` — Submit completed timesheet
+- `/unanet I want to take off April 3rd` — Create a leave request
 
 ## Commands
 
@@ -60,9 +61,31 @@ unanet submit
 
 Only use when the user explicitly asks to submit. This is different from Save (which happens automatically after fill).
 
+### Create a leave request
+
+```bash
+unanet leave --data '{"begin":"2026-04-03","end":"2026-04-03","hours":8}'
+```
+
+**Field mapping:**
+- `begin`: Start date (YYYY-MM-DD)
+- `end`: End date (YYYY-MM-DD), same as begin for single-day requests
+- `hours`: Total hours for the leave period (8 per day typically)
+- `comments`: Optional comment text
+- `submit`: Set to `true` to submit for approval (default: save only)
+- `includeNonWorkDays`: Set to `true` to include weekends (default: false)
+
+**Interpreting natural language:**
+- "take off April 3rd" → `{"begin":"2026-04-03","end":"2026-04-03","hours":8,"submit":true}`
+- "take off April 3-4" → `{"begin":"2026-04-03","end":"2026-04-04","hours":16,"submit":true}`
+- "PTO next Friday" → calculate the date, 8 hours, submit
+
+Use `--no-save` to preview without saving. Default behavior is to submit leave requests (unlike timesheets which default to save).
+
 ## Options
 
 - `--visible` — Show the browser window (useful for debugging)
+- `--no-save` — Preview without saving (works with fill and leave)
 - `--screenshot PATH` — Custom screenshot path (default: `/tmp/unanet-screenshot.png`)
 
 ## Behavior
