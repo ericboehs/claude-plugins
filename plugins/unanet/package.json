@@ -1,0 +1,11 @@
+{
+  "name": "unanet-cli",
+  "version": "0.1.0",
+  "description": "CLI tool for Unanet timesheet automation via Playwright",
+  "bin": {
+    "unanet": "./bin/unanet"
+  },
+  "dependencies": {
+    "playwright": "^1.50.0"
+  }
+}

@@ -1,0 +1,413 @@
+#!/usr/bin/env node
+
+const { chromium } = require('playwright');
+const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// --- Config ---
+
+const CONFIG_DIR = path.join(process.env.HOME, '.config', 'unanet');
+const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+
+function loadConfig() {
+  if (!fs.existsSync(CONFIG_FILE)) {
+    console.error('No config found. Run the setup-unanet skill first.');
+    console.error(`Expected config at: ${CONFIG_FILE}`);
+    process.exit(1);
+  }
+  return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+}
+
+// --- Credentials via 1Password CLI ---
+
+function opSignIn() {
+  try {
+    const masterPass = execFileSync(
+      'security', ['find-generic-password', '-s', 'op-master', '-w'],
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    const sessionToken = execFileSync(
+      'bash', ['-c', `printf '%s' "$1" | op signin --account my --raw`, '--', masterPass],
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    return sessionToken;
+  } catch (e) {
+    console.error('Failed to sign in to 1Password. Is the master password stored in Keychain?');
+    console.error('Run: security add-generic-password -s "op-master" -a "your-email" -w');
+    process.exit(1);
+  }
+}
+
+function opGetField(sessionToken, itemId, field) {
+  const env = { ...process.env, OP_SESSION_my: sessionToken };
+  return execFileSync(
+    'op', ['item', 'get', itemId, '--fields', field, '--reveal'],
+    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env }
+  ).trim();
+}
+
+function opGetOTP(sessionToken, itemId) {
+  const env = { ...process.env, OP_SESSION_my: sessionToken };
+  return execFileSync(
+    'op', ['item', 'get', itemId, '--otp'],
+    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env }
+  ).trim();
+}
+
+function getCredentials(config) {
+  const sessionToken = opSignIn();
+  const itemId = config.op_item;
+  return {
+    username: opGetField(sessionToken, itemId, 'username'),
+    password: opGetField(sessionToken, itemId, 'password'),
+    getOTP: () => opGetOTP(sessionToken, itemId),
+  };
+}
+
+// --- Okta SSO Login ---
+
+async function loginToUnanet(page, config, creds) {
+  const timeUrl = `${config.url}/action/time/current`;
+  await page.goto(timeUrl);
+  await page.waitForLoadState('networkidle');
+
+  if (!page.url().includes('okta')) {
+    return;
+  }
+
+  // Username
+  const identifierField = page.locator('input[name="identifier"]');
+  if (await identifierField.count() > 0) {
+    await identifierField.fill(creds.username);
+    await page.locator('input[type="submit"], button[type="submit"]').click();
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(2000);
+  }
+
+  // Okta may show MFA chooser first, then password, or password directly.
+  // Loop through possible screens until we reach the TOTP entry or Unanet.
+  for (let step = 0; step < 5; step++) {
+    // Already on Unanet? Done.
+    if (!page.url().includes('okta')) break;
+
+    // Password chooser option (when Okta shows MFA method list with "Password" as an option)
+    const passwordOption = page.locator('[data-se="okta_password"]');
+    if (await passwordOption.count() > 0) {
+      await passwordOption.click();
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(1000);
+      continue;
+    }
+
+    // Password field
+    const pwField = page.locator('input[type="password"]');
+    if (await pwField.count() > 0) {
+      await pwField.fill(creds.password);
+      await page.locator('input[type="submit"], button[type="submit"]').click();
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+      continue;
+    }
+
+    // MFA method selection — pick Google Authenticator (first "Select" button)
+    const selectButtons = page.locator('button:has-text("Select"), a:has-text("Select")');
+    if (await selectButtons.count() > 0) {
+      await selectButtons.nth(0).click();
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(1000);
+      continue;
+    }
+
+    // TOTP entry (with retry if code was already used)
+    const otpField = page.locator('input[type="tel"], input[name="credentials.passcode"], input[name="answer"]');
+    if (await otpField.count() > 0) {
+      let lastOtp = '';
+      for (let attempt = 0; attempt < 3; attempt++) {
+        let otp = creds.getOTP();
+        // If same code as last attempt, wait for next 30s window
+        if (otp === lastOtp) {
+          const now = Math.floor(Date.now() / 1000);
+          const waitSecs = 30 - (now % 30) + 1;
+          await page.waitForTimeout(waitSecs * 1000);
+          otp = creds.getOTP();
+        }
+        lastOtp = otp;
+        await otpField.nth(0).fill(otp);
+        await page.locator('input[type="submit"], button[type="submit"]').click();
+        await page.waitForLoadState('networkidle');
+        await page.waitForTimeout(3000);
+
+        // Check for "code can only be used once" error
+        const errorText = await page.locator('text=code can only be used once').count();
+        if (errorText === 0) break;
+
+        // Wait for next TOTP window before retrying
+        const now = Math.floor(Date.now() / 1000);
+        const waitSecs = 30 - (now % 30) + 1;
+        await page.waitForTimeout(waitSecs * 1000);
+      }
+      continue;
+    }
+
+    // Unknown state — wait and retry
+    await page.waitForTimeout(2000);
+  }
+
+  if (page.url().includes('okta')) {
+    throw new Error(`Login failed. Still on Okta: ${page.url()}`);
+  }
+}
+
+// --- Timesheet Operations ---
+
+function parseTimesheetData(html) {
+  const dateMatches = [...html.matchAll(/dates\.push\(new Date\((\d+),(\d+),(\d+)\)\)/g)];
+  const dates = dateMatches.map(m => {
+    const d = new Date(parseInt(m[1]), parseInt(m[2]), parseInt(m[3]));
+    return d.toISOString().split('T')[0];
+  });
+
+  const projectMatches = [...html.matchAll(/new Project\((\d+),unescape\('([^']+)'\),unescape\('([^']+)'\)/g)];
+  const projects = projectMatches.map(m => ({
+    id: parseInt(m[1]),
+    code: decodeURIComponent(m[2]),
+    name: decodeURIComponent(m[3]),
+  }));
+
+  const taskMatches = [...html.matchAll(/new Task\((\d+),unescape\('([^']+)'\)/g)];
+  const tasks = taskMatches.map(m => ({
+    id: parseInt(m[1]),
+    name: decodeURIComponent(m[2]),
+  }));
+
+  return { dates, projects, tasks };
+}
+
+async function viewTimesheet(page) {
+  const html = await page.content();
+  const data = parseTimesheetData(html);
+
+  const rows = [];
+  let rowIdx = 0;
+  while (true) {
+    const projectInput = page.locator(`#project_name_r${rowIdx}`);
+    if (await projectInput.count() === 0) break;
+
+    const projectName = await projectInput.inputValue();
+    if (!projectName) { rowIdx++; continue; }
+
+    const taskInput = page.locator(`#task_name_r${rowIdx}`);
+    const taskName = await taskInput.inputValue();
+
+    const hours = {};
+    for (let d = 0; d < data.dates.length; d++) {
+      const input = page.locator(`#d_r${rowIdx}_${d}`);
+      if (await input.count() > 0) {
+        const val = await input.inputValue();
+        if (val) hours[data.dates[d]] = parseFloat(val);
+      }
+    }
+
+    rows.push({ row: `r${rowIdx}`, project: projectName, task: taskName, hours });
+    rowIdx++;
+  }
+
+  return { dates: data.dates, rows, projects: data.projects, tasks: data.tasks };
+}
+
+async function fillTime(page, fillData) {
+  const html = await page.content();
+  const data = parseTimesheetData(html);
+
+  // Find the row matching the project
+  let targetRow = null;
+  let rowIdx = 0;
+  while (true) {
+    const projectInput = page.locator(`#project_name_r${rowIdx}`);
+    if (await projectInput.count() === 0) break;
+
+    const projectName = await projectInput.inputValue();
+    if (projectName && projectName.toLowerCase().includes(fillData.project.toLowerCase())) {
+      targetRow = rowIdx;
+      break;
+    }
+    rowIdx++;
+  }
+
+  if (targetRow === null) {
+    throw new Error(`Project "${fillData.project}" not found on timesheet.`);
+  }
+
+  for (const day of fillData.days) {
+    const dayIdx = data.dates.indexOf(day);
+    if (dayIdx === -1) {
+      console.error(`Date ${day} not in current timesheet period (${data.dates[0]} to ${data.dates[data.dates.length - 1]})`);
+      continue;
+    }
+
+    const input = page.locator(`#d_r${targetRow}_${dayIdx}`);
+    if (await input.count() > 0) {
+      await input.click();
+      // hours: 0 or hours: "" clears the cell
+      const value = fillData.hours === 0 || fillData.hours === '' ? '' : String(fillData.hours);
+      await input.fill(value);
+      // Click somewhere neutral to trigger blur/change handlers
+      await page.locator('#timesheet thead th').nth(0).click();
+      await page.waitForTimeout(500);
+    }
+  }
+
+  // Extra settle time before save
+  await page.waitForTimeout(1000);
+}
+
+async function saveTimesheet(page, auditReason) {
+  await page.evaluate(() => { doSave('save'); });
+  await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(2000);
+
+  // Handle audit trail page if it appears (triggered when correcting existing entries)
+  const auditTrail = page.locator('text=Audit Trail');
+  if (await auditTrail.count() > 0) {
+    const reason = auditReason || { type: 'Entry Error', comment: 'Entered incorrect hours' };
+
+    // Select "Use a single Change Reason for all modified entries"
+    const singleRadio = page.locator('input[type="radio"]').nth(1);
+    await singleRadio.click();
+    await page.waitForTimeout(1000);
+
+    // Select reason from dropdown
+    const select = page.locator('select');
+    if (await select.count() > 0) {
+      const options = await select.nth(0).locator('option').allTextContents();
+      const match = options.find(o => o.toLowerCase().includes(reason.type.toLowerCase()));
+      if (match) {
+        await select.nth(0).selectOption({ label: match });
+      }
+    }
+
+    // Fill comment
+    const textarea = page.locator('textarea');
+    if (await textarea.count() > 0) {
+      await textarea.nth(0).fill(reason.comment);
+    }
+
+    await page.waitForTimeout(500);
+
+    // Click Save on the audit trail page
+    const saveBtn = page.locator('button:has-text("Save"), input[value="Save"]');
+    if (await saveBtn.count() > 0) {
+      await saveBtn.nth(0).click();
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+    }
+  }
+}
+
+// --- CLI ---
+
+function printUsage() {
+  console.log(`Usage: unanet <command> [options]
+
+Commands:
+  view                     Show current timesheet state
+  fill                     Fill hours on the timesheet
+  submit                   Submit the timesheet
+
+Options:
+  --data JSON              JSON data for fill command
+                           {"project":"EERT","hours":8,"days":["2026-03-18"]}
+  --visible                Show browser window (default: headless)
+  --screenshot PATH        Save screenshot (default: /tmp/unanet-screenshot.png)
+  --help                   Show this help
+
+Examples:
+  unanet view
+  unanet fill --data '{"project":"EERT","hours":8,"days":["2026-03-18","2026-03-19"]}'
+  unanet fill --data '{"project":"EERT","hours":8,"days":["2026-03-18"]}' --visible`);
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  const command = args[0];
+
+  if (!command || command === '--help') {
+    printUsage();
+    process.exit(0);
+  }
+
+  const visible = args.includes('--visible');
+  const noSave = args.includes('--no-save');
+  const dataIdx = args.indexOf('--data');
+  const rawData = dataIdx !== -1 ? JSON.parse(args[dataIdx + 1]) : null;
+  // Support both single object and array of objects
+  const fillEntries = rawData ? (Array.isArray(rawData) ? rawData : [rawData]) : null;
+  const ssIdx = args.indexOf('--screenshot');
+  const screenshotPath = ssIdx !== -1 ? args[ssIdx + 1] : '/tmp/unanet-screenshot.png';
+
+  const config = loadConfig();
+  const creds = getCredentials(config);
+
+  const browser = await chromium.launch({ headless: !visible });
+  const context = await browser.newContext();
+  const page = await context.newPage();
+
+  try {
+    await loginToUnanet(page, config, creds);
+
+    switch (command) {
+      case 'view': {
+        const state = await viewTimesheet(page);
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        console.log(JSON.stringify(state, null, 2));
+        console.log(`\nScreenshot saved to ${screenshotPath}`);
+        break;
+      }
+      case 'fill': {
+        if (!fillEntries) {
+          console.error('--data required for fill command');
+          process.exit(1);
+        }
+        for (const entry of fillEntries) {
+          await fillTime(page, entry);
+        }
+        if (!noSave) {
+          await saveTimesheet(page);
+        }
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        const state = await viewTimesheet(page);
+        console.log(JSON.stringify(state, null, 2));
+        const action = noSave ? 'Preview (not saved)' : 'Timesheet saved';
+        console.log(`\n${action}. Screenshot at ${screenshotPath}`);
+        break;
+      }
+      case 'submit': {
+        await page.evaluate(() => { showSubmit(); });
+        await page.waitForTimeout(500);
+        await page.evaluate(() => { doSubmit(false); });
+        await page.waitForLoadState('networkidle');
+        await page.waitForTimeout(2000);
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        console.log(`Timesheet submitted. Screenshot at ${screenshotPath}`);
+        break;
+      }
+      default:
+        console.error(`Unknown command: ${command}`);
+        printUsage();
+        process.exit(1);
+    }
+  } catch (err) {
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    console.error(`Error: ${err.message}`);
+    console.error(`Screenshot saved to ${screenshotPath}`);
+    process.exit(1);
+  } finally {
+    await browser.close();
+  }
+}
+
+main().catch(err => {
+  console.error(err);
+  process.exit(1);
+});
