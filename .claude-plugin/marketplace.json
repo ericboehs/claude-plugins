@@ -115,6 +115,39 @@
       },
       "source": "./plugins/unanet",
       "category": "productivity"
+    },
+    {
+      "name": "dev-lifecycle",
+      "version": "1.0.0",
+      "description": "Full feature development lifecycle — plan, implement, test, review, PR, Copilot review, verify CI, QA demo, merge, and clean up in one command",
+      "author": {
+        "name": "Eric Boehs",
+        "url": "https://github.com/ericboehs"
+      },
+      "source": "./plugins/dev-lifecycle",
+      "category": "developer-tools"
+    },
+    {
+      "name": "gh-copilot-review",
+      "version": "1.0.0",
+      "description": "Wait for GitHub Copilot PR reviews, address feedback, resolve threads, and push fixes",
+      "author": {
+        "name": "Eric Boehs",
+        "url": "https://github.com/ericboehs"
+      },
+      "source": "./plugins/gh-copilot-review",
+      "category": "developer-tools"
+    },
+    {
+      "name": "watch-ci",
+      "version": "1.0.0",
+      "description": "Monitor GitHub Actions CI status for the current branch, auto-exit on pass or fail",
+      "author": {
+        "name": "Eric Boehs",
+        "url": "https://github.com/ericboehs"
+      },
+      "source": "./plugins/watch-ci",
+      "category": "developer-tools"
     }
   ]
 }
