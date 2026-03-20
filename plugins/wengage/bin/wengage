@@ -1,0 +1,589 @@
+#!/usr/bin/env node
+
+const { chromium } = require('playwright');
+const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// --- Config ---
+
+const CONFIG_DIR = path.join(process.env.HOME, '.config', 'wengage');
+const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+const STORAGE_STATE_FILE = path.join(CONFIG_DIR, 'storage-state.json');
+const COOKIES_FILE = path.join(CONFIG_DIR, 'cookies.json');
+
+function loadConfig() {
+  if (!fs.existsSync(CONFIG_FILE)) {
+    console.error('No config found. Run the setup-wengage skill first.');
+    console.error(`Expected config at: ${CONFIG_FILE}`);
+    process.exit(1);
+  }
+  return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+}
+
+// --- Credentials via 1Password CLI ---
+
+function opSignIn() {
+  try {
+    const masterPass = execFileSync(
+      'security', ['find-generic-password', '-s', 'op-master', '-w'],
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    const sessionToken = execFileSync(
+      'bash', ['-c', 'printf \'%s\' "$1" | op signin --account my --raw', '--', masterPass],
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+    return sessionToken;
+  } catch {
+    console.error('Failed to sign in to 1Password.');
+    process.exit(1);
+  }
+}
+
+function opGetField(sessionToken, itemId, field) {
+  const env = { ...process.env, OP_SESSION_my: sessionToken };
+  return execFileSync(
+    'op', ['item', 'get', itemId, '--fields', field, '--reveal'],
+    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env }
+  ).trim();
+}
+
+function getCredentials(config) {
+  const sessionToken = opSignIn();
+  const itemId = config.op_item;
+  return {
+    username: opGetField(sessionToken, itemId, 'username'),
+    password: opGetField(sessionToken, itemId, 'password'),
+  };
+}
+
+// --- Login ---
+
+async function login(config, creds) {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const page = await context.newPage();
+
+  await page.goto(`${config.url}/account/login`);
+  await page.waitForLoadState('networkidle');
+  await page.fill('#Username', creds.username);
+  await page.fill('#Password', creds.password);
+  await page.click('button[type="submit"]:not([name="externalProviderId"])');
+
+  await page.waitForURL(url => !url.toString().includes('/account/login'), { timeout: 30000 });
+  await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+
+  // Save session
+  await context.storageState({ path: STORAGE_STATE_FILE });
+
+  // Save cookies for fetch-based access
+  const cookies = await context.cookies();
+  fs.writeFileSync(COOKIES_FILE, JSON.stringify(cookies, null, 2));
+
+  await browser.close();
+  return cookies;
+}
+
+// --- Cookie-based fetch ---
+
+function loadCookies() {
+  if (!fs.existsSync(COOKIES_FILE)) return null;
+  return JSON.parse(fs.readFileSync(COOKIES_FILE, 'utf8'));
+}
+
+function cookieHeader(cookies) {
+  return cookies.map(c => `${c.name}=${c.value}`).join('; ');
+}
+
+async function authenticatedFetch(url, config, options = {}) {
+  let cookies = loadCookies();
+
+  // Try with existing cookies first
+  if (cookies) {
+    const resp = await fetchWithCookies(url, cookies, options);
+    // Check if redirected to login
+    if (resp.ok && !resp.url.includes('/account/login')) {
+      return resp;
+    }
+  }
+
+  // Need fresh login
+  console.error('Session expired, logging in...');
+  const creds = getCredentials(config);
+  cookies = await login(config, creds);
+  return fetchWithCookies(url, cookies, options);
+}
+
+async function fetchWithCookies(url, cookies, options = {}) {
+  const headers = { Cookie: cookieHeader(cookies), ...options.headers };
+  if (options.body) {
+    headers['Content-Type'] = headers['Content-Type'] || 'application/x-www-form-urlencoded';
+  }
+  return fetch(url, { ...options, headers, redirect: 'manual' });
+}
+
+// --- Data Extraction ---
+
+async function getSessionAndStudents(config) {
+  const resp = await authenticatedFetch(
+    `${config.url}/gradebook/guardianportal`,
+    config
+  );
+  const html = await resp.text();
+
+  // Extract student GUIDs from tab buttons
+  const studentMatches = [...html.matchAll(/tabPage_Tab_([a-f0-9-]+)-of-StudentOverviewNavigation/g)];
+  const studentIds = [...new Set(studentMatches.map(m => m[1]))];
+
+  if (studentIds.length === 0) {
+    console.error('No students found. Session may be invalid.');
+    process.exit(1);
+  }
+
+  // Get session ID by fetching the first student's partial
+  const cookies = loadCookies();
+  const partialResp = await fetchWithCookies(
+    `${config.url}/Gradebook/GuardianPortal/Index/StudentOverviewPartial?ID=${studentIds[0]}`,
+    cookies,
+    { method: 'POST', body: 'keyvalue=' }
+  );
+  const partialHtml = await partialResp.text();
+  const sessionMatch = partialHtml.match(/HiddenSessionID_I[^>]*value="([^"]+)"/);
+  const sessionId = sessionMatch ? sessionMatch[1] : null;
+
+  if (!sessionId) {
+    console.error('Could not extract session ID.');
+    process.exit(1);
+  }
+
+  // Use config students if provided, otherwise auto-discover from page HTML
+  // Use config students if provided, otherwise auto-discover from page HTML
+  let students;
+  if (config.students && config.students.length > 0) {
+    students = config.students;
+  } else {
+    students = studentIds.map(id => {
+      const tabIdx = html.indexOf(`tabPage_Tab_${id}-of-StudentOverviewNavigation`);
+      const chunk = html.substring(tabIdx, tabIdx + 2000);
+      const nameMatch = chunk.match(/dx-wrap">([^<]+)/);
+      return { id, name: nameMatch ? nameMatch[1].trim() : id, grade: '' };
+    });
+  }
+
+  return { sessionId, students, studentIds };
+}
+
+function parseSummary(html) {
+  const lunchMatch = html.match(/Lunch Room Balance[\s\S]*?\$([0-9.]+)/);
+  const feeMatch = html.match(/Fee Balance[\s\S]*?\$([0-9.]+)/);
+  return {
+    lunchBalance: lunchMatch ? `$${lunchMatch[1]}` : 'N/A',
+    feeBalance: feeMatch ? `$${feeMatch[1]}` : 'N/A',
+  };
+}
+
+function parseClasses(html) {
+  const groups = html.split(/class="dxnb-gr"/);
+  const classes = [];
+
+  for (let i = 1; i < groups.length; i++) {
+    const g = groups[i];
+
+    const nameMatch = g.match(/navbar_section_label[^>]*>([^<]+)/);
+    if (!nameMatch) continue;
+
+    const gradeLink = g.match(/>([A-F]\/\d+\(est\))</);
+    const gradeLabel = g.match(/lbl_GradeLabel_[^>]*>([^<]+)/);
+    const grade = gradeLink ? gradeLink[1] : (gradeLabel ? gradeLabel[1].trim() : 'N/A');
+
+    const pdfMatch = g.match(/GetGradeDetail\?ID=([a-f0-9-]+)/);
+    const instructorMatch = g.match(/_Instructor"[^>]*><b>([^<]+)<\/b>/);
+    const emailMatch = g.match(/mailto:([^"]+)/);
+
+    const exAbs = g.match(/btnExcused_Abs_[^>]+>(\d+)</);
+    const unexAbs = g.match(/btnUnexcused_Abs_[^>]+>(\d+)</);
+    const actAbs = g.match(/btnActivity_Abs_[^>]+>(\d+)</);
+    const exTar = g.match(/btnExcused_Tar_[^>]+>(\d+)</);
+    const unexTar = g.match(/btnUnexcused_Tar_[^>]+>(\d+)</);
+
+    // Section GUID (used for assignment detail fetches)
+    const sectionGuidMatch = g.match(/btnScored_([a-f0-9-]+)/);
+
+    const scored = g.match(/btnScored_[^>]+>(\d+)</);
+    const pending = g.match(/btnPending_[^>]+>(\d+)</);
+    const incomplete = g.match(/btnIncomplete_[^>]+>(\d+)</);
+    const zero = g.match(/btnZero_[^>]+>(\d+)</);
+
+    const behavior = g.match(/btnBehavior_[^>]+>(\d+)</);
+    const academic = g.match(/btnAcademic_[^>]+>(\d+)</);
+    const otherN = g.match(/btnOther_[^>]+>(\d+)</);
+
+    classes.push({
+      name: nameMatch[1].trim(),
+      grade,
+      pdfId: pdfMatch ? pdfMatch[1] : null,
+      sectionGuid: sectionGuidMatch ? sectionGuidMatch[1] : null,
+      instructor: instructorMatch ? instructorMatch[1].trim() : null,
+      email: emailMatch ? emailMatch[1] : null,
+      attendance: {
+        excusedAbsences: exAbs ? parseInt(exAbs[1]) : 0,
+        unexcusedAbsences: unexAbs ? parseInt(unexAbs[1]) : 0,
+        activityAbsences: actAbs ? parseInt(actAbs[1]) : 0,
+        excusedTardies: exTar ? parseInt(exTar[1]) : 0,
+        unexcusedTardies: unexTar ? parseInt(unexTar[1]) : 0,
+      },
+      assignments: {
+        scored: scored ? parseInt(scored[1]) : 0,
+        pending: pending ? parseInt(pending[1]) : 0,
+        incomplete: incomplete ? parseInt(incomplete[1]) : 0,
+        zero: zero ? parseInt(zero[1]) : 0,
+      },
+      notes: {
+        behavior: behavior ? parseInt(behavior[1]) : 0,
+        academic: academic ? parseInt(academic[1]) : 0,
+        other: otherN ? parseInt(otherN[1]) : 0,
+      },
+    });
+  }
+
+  return classes;
+}
+
+async function fetchStudentData(config, studentId, sessionId) {
+  const cookies = loadCookies();
+  const base = `${config.url}/Gradebook/GuardianPortal`;
+
+  const [summaryResp, detailResp] = await Promise.all([
+    fetchWithCookies(`${base}/StudentOverview/ShowSummary?ID=${studentId}`, cookies,
+      { method: 'POST', body: `keyvalue=${sessionId}` }),
+    fetchWithCookies(`${base}/StudentOverview/SectionDetailPartialInit`, cookies,
+      { method: 'POST', body: `val=${studentId}%7C${sessionId}` }),
+  ]);
+
+  const summaryHtml = await summaryResp.text();
+  const detailHtml = await detailResp.text();
+
+  return {
+    balances: parseSummary(summaryHtml),
+    classes: parseClasses(detailHtml),
+  };
+}
+
+function parseAssignmentHtml(html) {
+  // Strip scripts first, then convert HTML to tab-delimited text
+  const textContent = html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, '\t')
+    .replace(/\t+/g, '\t');
+
+  const matches = [...textContent.matchAll(
+    /Title\t([^\t]+)\tDue Date\t([^\t]+)\tPts Poss\.\t([^\t]+)\tPts Rec\.\t([^\t]+)\tScore\t([^\t]+)/g
+  )];
+
+  return matches.map(m => ({
+    title: m[1].trim(),
+    dueDate: m[2].trim(),
+    pointsPossible: parseFloat(m[3]) || 0,
+    pointsReceived: parseFloat(m[4]) || 0,
+    score: m[5].trim(),
+  }));
+}
+
+async function fetchAssignments(config, studentId, sessionId, sectionGuid, type) {
+  const cookies = loadCookies();
+  const base = `${config.url}/Gradebook/GuardianPortal`;
+  const endpoints = {
+    scored: 'GetScoredAssignmentsDetail',
+    pending: 'GetPendingAssignmentsDetail',
+    incomplete: 'GetIncompleteAssignmentsDetail',
+    zero: 'GetZeroAssignmentsDetail',
+  };
+  const endpoint = endpoints[type] || endpoints.scored;
+  const resp = await fetchWithCookies(
+    `${base}/StudentOverview/${endpoint}`,
+    cookies,
+    { method: 'POST', body: `val=${studentId}|${sessionId}|${sectionGuid}` }
+  );
+  const html = await resp.text();
+  return parseAssignmentHtml(html);
+}
+
+async function fetchGradeReport(config, pdfId, outputPath) {
+  const cookies = loadCookies();
+  const base = `${config.url}/Gradebook/GuardianPortal`;
+  const resp = await fetchWithCookies(
+    `${base}/StudentOverview/GetGradeDetail?ID=${pdfId}`,
+    cookies
+  );
+
+  if (!resp.ok) {
+    throw new Error(`Failed to fetch grade report: HTTP ${resp.status}`);
+  }
+
+  const buffer = Buffer.from(await resp.arrayBuffer());
+  fs.writeFileSync(outputPath, buffer);
+  return outputPath;
+}
+
+// --- Display ---
+
+function studentLabel(student, data) {
+  if (student.grade) return `${student.name} (${student.grade})`;
+  // Infer grade level from class names (e.g., "MATH - 05" → 5th)
+  const gradeMatch = data.classes[0]?.name.match(/[\s-]0?(\d+)\s*Per/);
+  if (gradeMatch) {
+    const n = parseInt(gradeMatch[1]);
+    const suffix = n === 1 ? 'st' : n === 2 ? 'nd' : n === 3 ? 'rd' : 'th';
+    return `${student.name} (${n}${suffix} Grade)`;
+  }
+  return student.name;
+}
+
+function formatStudent(student, data) {
+  const lines = [];
+  const bar = '='.repeat(65);
+  lines.push(bar);
+  lines.push(` ${studentLabel(student, data)}`);
+  lines.push(` Lunch: ${data.balances.lunchBalance}  |  Fees: ${data.balances.feeBalance}`);
+  lines.push(bar);
+
+  for (const c of data.classes) {
+    lines.push('');
+    lines.push(`  ${c.name}`);
+    lines.push(`    Grade: ${c.grade.padEnd(12)}  Instructor: ${c.instructor || '-'} (${c.email || '-'})`);
+
+    const att = c.attendance;
+    const totalAbs = att.excusedAbsences + att.unexcusedAbsences + att.activityAbsences;
+    const totalTar = att.excusedTardies + att.unexcusedTardies;
+    if (totalAbs > 0 || totalTar > 0) {
+      const parts = [];
+      if (att.excusedAbsences) parts.push(`${att.excusedAbsences} exc abs`);
+      if (att.unexcusedAbsences) parts.push(`${att.unexcusedAbsences} unexc abs`);
+      if (att.activityAbsences) parts.push(`${att.activityAbsences} act abs`);
+      if (att.excusedTardies) parts.push(`${att.excusedTardies} exc tar`);
+      if (att.unexcusedTardies) parts.push(`${att.unexcusedTardies} unexc tar`);
+      lines.push(`    Attendance: ${parts.join(', ')}`);
+    }
+
+    const asg = c.assignments;
+    const asgParts = [];
+    if (asg.scored) asgParts.push(`${asg.scored} scored`);
+    if (asg.pending) asgParts.push(`${asg.pending} pending`);
+    if (asg.incomplete) asgParts.push(`${asg.incomplete} incomplete`);
+    if (asg.zero) asgParts.push(`${asg.zero} zero`);
+    if (asgParts.length) lines.push(`    Assignments: ${asgParts.join(', ')}`);
+
+    const n = c.notes;
+    if (n.behavior || n.academic || n.other) {
+      const np = [];
+      if (n.behavior) np.push(`${n.behavior} behavior`);
+      if (n.academic) np.push(`${n.academic} academic`);
+      if (n.other) np.push(`${n.other} other`);
+      lines.push(`    Notes: ${np.join(', ')}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+function formatGradesOnly(student, data) {
+  const lines = [];
+  lines.push(`${studentLabel(student, data)} — Lunch: ${data.balances.lunchBalance}`);
+
+  const graded = data.classes.filter(c => c.grade !== 'N/A');
+  const ungraded = data.classes.filter(c => c.grade === 'N/A');
+
+  for (const c of graded) {
+    const className = c.name.replace(/\s*-\s*\d+\s*Per:.*/, '').replace(/-\d+\s*Per:.*/, '');
+    lines.push(`  ${className.padEnd(20)} ${c.grade}`);
+  }
+  if (ungraded.length) {
+    lines.push(`  (${ungraded.map(c => c.name.replace(/\s*-?\s*\d*\s*Per:.*/, '').replace(/-\d+\s*Per:.*/, '').trim()).join(', ')}: N/A)`);
+  }
+
+  return lines.join('\n');
+}
+
+// --- CLI ---
+
+function printUsage() {
+  console.log(`Usage: wengage <command> [options]
+
+Commands:
+  grades [student]       Show grades for one or all students
+  view [student]         Full detail view (grades, attendance, assignments)
+  assignments <student> [class]  Show individual assignment grades
+  report [student]       Download PDF report cards
+  json [student]         Output raw JSON data
+
+Options:
+  --type TYPE            Assignment type: scored, pending, incomplete, zero (default: scored)
+  --output DIR           Output directory for reports (default: /tmp)
+  --help                 Show this help
+
+Student filter:
+  "allie" or "layla" (partial, case-insensitive)
+  Omit to show all students (except assignments, which requires a student)
+
+Examples:
+  wengage grades
+  wengage grades allie
+  wengage view layla
+  wengage assignments allie reading
+  wengage assignments allie reading --type zero
+  wengage assignments layla math
+  wengage report
+  wengage report allie --output ~/Downloads
+  wengage json`);
+}
+
+function matchStudent(students, filter) {
+  if (!filter) return students;
+  const lower = filter.toLowerCase();
+  const matched = students.filter(s => s.name.toLowerCase().includes(lower));
+  if (matched.length === 0) {
+    console.error(`No student matching "${filter}". Available: ${students.map(s => s.name).join(', ')}`);
+    process.exit(1);
+  }
+  return matched;
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  const command = args[0];
+
+  if (!command || command === '--help') {
+    printUsage();
+    process.exit(0);
+  }
+
+  // Parse options
+  const studentFilter = args[1] && !args[1].startsWith('--') ? args[1] : null;
+  const classFilter = args[2] && !args[2].startsWith('--') ? args[2] : null;
+  const outputIdx = args.indexOf('--output');
+  const outputDir = outputIdx !== -1 ? args[outputIdx + 1] : '/tmp';
+  const typeIdx = args.indexOf('--type');
+  const assignmentType = typeIdx !== -1 ? args[typeIdx + 1] : 'scored';
+
+  const config = loadConfig();
+
+  // Ensure we have a valid session
+  const { sessionId, students } = await getSessionAndStudents(config);
+  const selectedStudents = matchStudent(students, studentFilter);
+
+  switch (command) {
+    case 'grades': {
+      for (const student of selectedStudents) {
+        const data = await fetchStudentData(config, student.id, sessionId);
+        console.log(formatGradesOnly(student, data));
+        if (selectedStudents.indexOf(student) < selectedStudents.length - 1) console.log('');
+      }
+      break;
+    }
+
+    case 'view': {
+      for (const student of selectedStudents) {
+        const data = await fetchStudentData(config, student.id, sessionId);
+        console.log(formatStudent(student, data));
+        if (selectedStudents.indexOf(student) < selectedStudents.length - 1) console.log('');
+      }
+      break;
+    }
+
+    case 'assignments': {
+      if (!studentFilter) {
+        console.error('Student name required. Usage: wengage assignments <student> [class]');
+        process.exit(1);
+      }
+      const student = selectedStudents[0];
+      const data = await fetchStudentData(config, student.id, sessionId);
+
+      // Filter classes by name if provided
+      let targetClasses = data.classes.filter(c => c.sectionGuid);
+      if (classFilter) {
+        const lower = classFilter.toLowerCase();
+        targetClasses = targetClasses.filter(c => c.name.toLowerCase().includes(lower));
+        if (targetClasses.length === 0) {
+          console.error(`No class matching "${classFilter}". Available:`);
+          data.classes.forEach(c => console.error(`  ${c.name}`));
+          process.exit(1);
+        }
+      }
+
+      for (const c of targetClasses) {
+        const assignments = await fetchAssignments(config, student.id, sessionId, c.sectionGuid, assignmentType);
+        console.log(`${student.name} — ${c.name} (${assignmentType})`);
+        console.log(`  Overall: ${c.grade}`);
+        if (assignments.length === 0) {
+          console.log(`  No ${assignmentType} assignments`);
+        } else {
+          console.log(`  ${'Assignment'.padEnd(40)} ${'Due'.padEnd(12)} ${'Pts'.padEnd(10)} Score`);
+          console.log(`  ${'-'.repeat(40)} ${'-'.repeat(12)} ${'-'.repeat(10)} ${'-'.repeat(8)}`);
+          for (const a of assignments) {
+            const title = a.title.length > 38 ? a.title.substring(0, 37) + '…' : a.title;
+            const pts = `${a.pointsReceived}/${a.pointsPossible}`;
+            console.log(`  ${title.padEnd(40)} ${a.dueDate.padEnd(12)} ${pts.padEnd(10)} ${a.score}`);
+          }
+        }
+        if (targetClasses.indexOf(c) < targetClasses.length - 1) console.log('');
+      }
+      break;
+    }
+
+    case 'report': {
+      for (const student of selectedStudents) {
+        const data = await fetchStudentData(config, student.id, sessionId);
+        const classesWithGrades = data.classes.filter(c => c.pdfId);
+
+        if (classesWithGrades.length === 0) {
+          console.log(`${student.name}: No report cards available`);
+          continue;
+        }
+
+        // Download each class report
+        const safeName = student.name.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
+        const downloaded = [];
+
+        for (const c of classesWithGrades) {
+          const className = c.name.replace(/\s*Per:.*/, '').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase();
+          const filename = `wengage-report-${safeName}-${className}.pdf`;
+          const outputPath = path.join(outputDir, filename);
+
+          try {
+            await fetchGradeReport(config, c.pdfId, outputPath);
+            downloaded.push({ class: c.name, grade: c.grade, path: outputPath });
+          } catch (err) {
+            console.error(`  Failed to download ${c.name}: ${err.message}`);
+          }
+        }
+
+        console.log(`${student.name} (${student.grade}):`);
+        for (const d of downloaded) {
+          console.log(`  ${d.class}: ${d.grade} → ${d.path}`);
+        }
+      }
+      break;
+    }
+
+    case 'json': {
+      const result = {};
+      for (const student of selectedStudents) {
+        const data = await fetchStudentData(config, student.id, sessionId);
+        result[student.name] = { ...student, ...data };
+      }
+      console.log(JSON.stringify(result, null, 2));
+      break;
+    }
+
+    default:
+      console.error(`Unknown command: ${command}`);
+      printUsage();
+      process.exit(1);
+  }
+}
+
+main().catch(err => {
+  console.error(`Error: ${err.message}`);
+  process.exit(1);
+});

@@ -1,0 +1,9 @@
+{
+  "name": "wengage",
+  "version": "1.0.0",
+  "description": "Check student grades, attendance, assignments, and balances from Wengage Guardian Portal via Playwright and 1Password credentials",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}
