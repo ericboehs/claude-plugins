@@ -5,7 +5,7 @@ Automate Unanet timesheet entry and leave requests via Playwright browser automa
 ## Prerequisites
 
 - **Node.js** (v18+)
-- **1Password CLI** (`op`) with biometric or Keychain-stored master password
+- **1Password CLI** (`op`) with biometric unlock enabled
 - **Playwright** (`npx playwright install chromium` after `npm install`)
 - A 1Password item containing your Okta credentials (username, password, TOTP)
 
@@ -16,9 +16,6 @@ Install the plugin, then run `/setup-unanet` to configure credentials and create
 Or manually:
 
 ```bash
-# Store your 1Password master password in macOS Keychain
-security add-generic-password -s "op-master" -a "your-email" -w
-
 # Create config
 mkdir -p ~/.config/unanet
 cat > ~/.config/unanet/config.json <<EOF
