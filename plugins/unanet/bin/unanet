@@ -9,6 +9,7 @@ const path = require('path');
 
 const CONFIG_DIR = path.join(process.env.HOME, '.config', 'unanet');
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+const STORAGE_STATE_FILE = path.join(CONFIG_DIR, 'storage-state.json');
 
 function loadConfig() {
   if (!fs.existsSync(CONFIG_FILE)) {
@@ -155,6 +156,8 @@ async function loginToUnanet(page, config, creds) {
   }
 
   if (page.url().includes('okta')) {
+    // Clear stale storage state so next attempt starts fresh
+    if (fs.existsSync(STORAGE_STATE_FILE)) fs.unlinkSync(STORAGE_STATE_FILE);
     throw new Error(`Login failed. Still on Okta: ${page.url()}`);
   }
 }
@@ -378,7 +381,8 @@ Examples:
   unanet fill --data '{"project":"EERT","hours":8,"days":["2026-03-18","2026-03-19"]}'
   unanet fill --data '{"project":"EERT","hours":8,"days":["2026-03-18"]}' --visible
   unanet leave --data '{"begin":"2026-04-03","end":"2026-04-03","hours":8}'
-  unanet leave --data '{"begin":"2026-04-03","end":"2026-04-04","hours":16,"comments":"Vacation"}'`);
+  unanet leave --data '{"begin":"2026-04-03","end":"2026-04-04","hours":16,"comments":"Vacation"}'
+  unanet leave --data '[{"begin":"2026-04-03","end":"2026-04-03","hours":8},{"begin":"2026-05-15","end":"2026-05-15","hours":8}]'`);
 }
 
 async function main() {
@@ -403,11 +407,17 @@ async function main() {
   const creds = getCredentials(config);
 
   const browser = await chromium.launch({ headless: !visible });
-  const context = await browser.newContext();
+  const contextOptions = {};
+  if (fs.existsSync(STORAGE_STATE_FILE)) {
+    contextOptions.storageState = STORAGE_STATE_FILE;
+  }
+  const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
 
   try {
     await loginToUnanet(page, config, creds);
+    // Save session for reuse by future invocations
+    await context.storageState({ path: STORAGE_STATE_FILE });
 
     switch (command) {
       case 'view': {
@@ -446,34 +456,46 @@ async function main() {
         break;
       }
       case 'leave': {
-        if (!rawData) {
+        if (!fillEntries) {
           console.error('--data required for leave command');
           console.error('Example: --data \'{"begin":"2026-04-03","end":"2026-04-03","hours":8}\'');
+          console.error('Batch:   --data \'[{"begin":"2026-04-03","end":"2026-04-03","hours":8},...]\'');
           process.exit(1);
         }
-        // Convert dates to MM/DD/YYYY for Unanet
         const toUnanetDate = (d) => {
           const [y, m, day] = d.split('-');
           return `${parseInt(m)}/${parseInt(day)}/${y}`;
         };
-        const leaveData = {
-          beginDate: toUnanetDate(rawData.begin),
-          endDate: toUnanetDate(rawData.end),
-          hours: rawData.hours,
-          comments: rawData.comments || '',
-          includeNonWorkDays: rawData.includeNonWorkDays || false,
-        };
-        await createLeaveRequest(page, config, leaveData);
-        if (!noSave) {
-          if (rawData.submit) {
-            await submitLeaveRequest(page);
-          } else {
-            await saveLeaveRequest(page);
+        const results = [];
+        for (const entry of fillEntries) {
+          const leaveData = {
+            beginDate: toUnanetDate(entry.begin),
+            endDate: toUnanetDate(entry.end),
+            hours: entry.hours,
+            comments: entry.comments || '',
+            includeNonWorkDays: entry.includeNonWorkDays || false,
+          };
+          await createLeaveRequest(page, config, leaveData);
+          if (!noSave) {
+            if (entry.submit) {
+              await submitLeaveRequest(page);
+            } else {
+              await saveLeaveRequest(page);
+            }
           }
+          const ssPath = fillEntries.length > 1
+            ? screenshotPath.replace(/\.png$/, `-${results.length + 1}.png`)
+            : screenshotPath;
+          await page.screenshot({ path: ssPath, fullPage: true });
+          results.push({ begin: entry.begin, end: entry.end, hours: entry.hours, screenshot: ssPath });
         }
-        await page.screenshot({ path: screenshotPath, fullPage: true });
-        const action = noSave ? 'Preview (not saved)' : (rawData.submit ? 'Leave request submitted' : 'Leave request saved');
-        console.log(`${action}. Screenshot at ${screenshotPath}`);
+        const action = noSave ? 'Preview (not saved)' : 'Leave request saved';
+        if (results.length === 1) {
+          console.log(`${action}. Screenshot at ${results[0].screenshot}`);
+        } else {
+          console.log(`${action} (${results.length} requests).`);
+          results.forEach(r => console.log(`  ${r.begin} to ${r.end}: ${r.hours}h — ${r.screenshot}`));
+        }
         break;
       }
       default:
