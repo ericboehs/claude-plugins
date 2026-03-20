@@ -64,7 +64,11 @@ Only use when the user explicitly asks to submit. This is different from Save (w
 ### Create a leave request
 
 ```bash
+# Single leave request
 unanet leave --data '{"begin":"2026-04-03","end":"2026-04-03","hours":8}'
+
+# Batch multiple leave requests in one session (preferred for multiple dates)
+unanet leave --data '[{"begin":"2026-04-03","end":"2026-04-03","hours":8},{"begin":"2026-05-15","end":"2026-05-15","hours":8}]'
 ```
 
 **Field mapping:**
@@ -75,12 +79,15 @@ unanet leave --data '{"begin":"2026-04-03","end":"2026-04-03","hours":8}'
 - `submit`: Set to `true` to submit for approval (default: save only)
 - `includeNonWorkDays`: Set to `true` to include weekends (default: false)
 
-**Interpreting natural language:**
-- "take off April 3rd" → `{"begin":"2026-04-03","end":"2026-04-03","hours":8,"submit":true}`
-- "take off April 3-4" → `{"begin":"2026-04-03","end":"2026-04-04","hours":16,"submit":true}`
-- "PTO next Friday" → calculate the date, 8 hours, submit
+**Batch leave requests:** When the user requests multiple leave dates, always use a JSON array to create them all in one CLI invocation. This uses a single browser session and avoids repeated Okta logins. Each request gets its own numbered screenshot (`-1.png`, `-2.png`, etc.).
 
-Use `--no-save` to preview without saving. Default behavior is to submit leave requests (unlike timesheets which default to save).
+**Interpreting natural language:**
+- "take off April 3rd" → `{"begin":"2026-04-03","end":"2026-04-03","hours":8}`
+- "take off April 3-4" → `{"begin":"2026-04-03","end":"2026-04-04","hours":16}`
+- "PTO next Friday" → calculate the date, 8 hours
+- "take off Oct 15, 16, and 19" → batch: `[{"begin":"2026-10-15","end":"2026-10-16","hours":16},{"begin":"2026-10-19","end":"2026-10-19","hours":8}]` (group consecutive days into ranges)
+
+Use `--no-save` to preview without saving.
 
 ## Options
 
