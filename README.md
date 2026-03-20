@@ -97,6 +97,19 @@ Multi-language linting via PostToolUse hooks. Automatically runs configured lint
 
 **Supported:** Ruby (rubocop, reek, brakeman), JS/TS (eslint, biome), Python (ruff, mypy, flake8), Go (golangci-lint), Rust (clippy), Markdown (markdownlint), HTML (htmlhint, prettier), Shell (shellcheck), Any (semgrep — language-agnostic SAST)
 
+### dev-lifecycle
+
+Full feature development lifecycle — plan, implement, test, review, PR, Copilot review, verify CI, QA demo, merge, and clean up in one command. See [full documentation](plugins/dev-lifecycle/README.md).
+
+**Usage:**
+- `/dev-lifecycle <feature description>` — Run the full plan-to-merge workflow
+- `/dev-lifecycle add rate limiting --skip-copilot` — Skip specific phases
+- `/dev-lifecycle fix bug --skip-merge` — Stop before merge for manual review
+
+**QA demo:** Auto-detects CLI (tmux split), web (headed browser), or library (verbose tests). User must approve before merge.
+
+**Companion plugins:** pr-review-toolkit, gh-copilot-review, watch-ci, code-lint (all optional — includes fallbacks)
+
 ### gh-copilot-review
 
 Wait for GitHub Copilot PR reviews, address feedback, resolve threads, and push fixes. See [full documentation](plugins/gh-copilot-review/README.md).

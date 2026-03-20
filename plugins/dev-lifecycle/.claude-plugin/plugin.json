@@ -1,0 +1,9 @@
+{
+  "name": "dev-lifecycle",
+  "version": "1.0.0",
+  "description": "Full feature development lifecycle — plan, implement, test, review, PR, Copilot review, and verify CI in one command",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}
