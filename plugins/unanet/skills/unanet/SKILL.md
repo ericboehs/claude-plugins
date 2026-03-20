@@ -1,6 +1,6 @@
 ---
 name: unanet
-description: Fill timesheets, view time entries, submit timesheets, and create leave requests on Unanet. Use when user asks about timesheets, time entry, logging hours, PTO, leave requests, taking time off, or says "/unanet".
+description: Fill timesheets, view time entries, submit timesheets, create and view leave requests on Unanet. Use when user asks about timesheets, time entry, logging hours, PTO, leave requests, taking time off, viewing leave, or says "/unanet".
 tools: Bash, Read
 ---
 
@@ -18,6 +18,7 @@ Manage Unanet timesheets and leave requests via the `unanet` CLI tool.
 - `/unanet fill 8h EERT for Wednesday and Thursday` — Fill time entries
 - `/unanet submit` — Submit completed timesheet
 - `/unanet I want to take off April 3rd` — Create a leave request
+- `/unanet show my leave requests` — View all leave requests
 
 ## Commands
 
@@ -88,6 +89,14 @@ unanet leave --data '[{"begin":"2026-04-03","end":"2026-04-03","hours":8},{"begi
 - "take off Oct 15, 16, and 19" → batch: `[{"begin":"2026-10-15","end":"2026-10-16","hours":16},{"begin":"2026-10-19","end":"2026-10-19","hours":8}]` (group consecutive days into ranges)
 
 Use `--no-save` to preview without saving.
+
+### View leave requests
+
+```bash
+unanet leave-list
+```
+
+Returns JSON array of all current leave requests with begin/end dates, hours, status, and comments. Also saves a screenshot. Always show the screenshot to the user.
 
 ## Options
 

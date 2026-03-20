@@ -68,7 +68,7 @@ function getCredentials(config) {
 
 // --- Okta SSO Login ---
 
-async function loginToUnanet(page, config, creds) {
+async function loginToUnanet(page, config) {
   const timeUrl = `${config.url}/action/time/current`;
   await page.goto(timeUrl);
   await page.waitForLoadState('networkidle');
@@ -76,6 +76,9 @@ async function loginToUnanet(page, config, creds) {
   if (!page.url().includes('okta')) {
     return;
   }
+
+  // Only fetch credentials when we actually need to authenticate
+  const creds = getCredentials(config);
 
   // Username
   const identifierField = page.locator('input[name="identifier"]');
@@ -356,6 +359,54 @@ async function submitLeaveRequest(page) {
   await page.waitForTimeout(2000);
 }
 
+// --- Leave List ---
+
+async function listLeaveRequests(page, config) {
+  await page.goto(`${config.url}/action/time/list`);
+  await page.waitForLoadState('networkidle');
+  await page.waitForTimeout(1000);
+
+  // The "Current Leave Requests" section is inside a nested table structure.
+  // Data rows are inside the inner table, each with class or direct td children.
+  const requests = await page.evaluate(() => {
+    const tables = Array.from(document.querySelectorAll('table'));
+    const leaveTable = tables.find(t => {
+      const firstCell = t.querySelector('td, th');
+      return firstCell && firstCell.textContent.includes('Current Leave Requests');
+    });
+    if (!leaveTable) return [];
+
+    // Find the inner data table (nested table with the actual rows)
+    const innerTables = leaveTable.querySelectorAll('table');
+    const dataTable = innerTables.length > 0 ? innerTables[innerTables.length - 1] : leaveTable;
+
+    const rows = Array.from(dataTable.querySelectorAll('tr'));
+    const results = [];
+    const datePattern = /^\d{1,2}\/\d{1,2}\/\d{4}$/;
+
+    for (const row of rows) {
+      // Only process rows that have direct td children (skip header rows with nested tables)
+      const cells = Array.from(row.querySelectorAll(':scope > td')).map(c => c.textContent.trim());
+      if (cells.length < 5) continue;
+
+      // Find the first cell that looks like a date
+      const dateIdx = cells.findIndex(c => datePattern.test(c));
+      if (dateIdx === -1) continue;
+
+      const begin = cells[dateIdx];
+      const end = cells[dateIdx + 2]; // skip the "—"
+      const hours = cells[dateIdx + 3];
+      const status = cells[dateIdx + 4];
+      // Comments are after status + timestamp (date, time)
+      const comments = cells.slice(dateIdx + 7).filter(c => c).join(' ');
+      results.push({ begin, end, hours: parseFloat(hours), status, comments: comments || null });
+    }
+    return results;
+  });
+
+  return requests;
+}
+
 // --- CLI ---
 
 function printUsage() {
@@ -366,6 +417,7 @@ Commands:
   fill                     Fill hours on the timesheet
   submit                   Submit the timesheet
   leave                    Create a leave request
+  leave-list               View existing leave requests
 
 Options:
   --data JSON              JSON data for fill/leave commands
@@ -382,7 +434,8 @@ Examples:
   unanet fill --data '{"project":"EERT","hours":8,"days":["2026-03-18"]}' --visible
   unanet leave --data '{"begin":"2026-04-03","end":"2026-04-03","hours":8}'
   unanet leave --data '{"begin":"2026-04-03","end":"2026-04-04","hours":16,"comments":"Vacation"}'
-  unanet leave --data '[{"begin":"2026-04-03","end":"2026-04-03","hours":8},{"begin":"2026-05-15","end":"2026-05-15","hours":8}]'`);
+  unanet leave --data '[{"begin":"2026-04-03","end":"2026-04-03","hours":8},{"begin":"2026-05-15","end":"2026-05-15","hours":8}]'
+  unanet leave-list`);
 }
 
 async function main() {
@@ -404,7 +457,6 @@ async function main() {
   const screenshotPath = ssIdx !== -1 ? args[ssIdx + 1] : '/tmp/unanet-screenshot.png';
 
   const config = loadConfig();
-  const creds = getCredentials(config);
 
   const browser = await chromium.launch({ headless: !visible });
   const contextOptions = {};
@@ -415,7 +467,7 @@ async function main() {
   const page = await context.newPage();
 
   try {
-    await loginToUnanet(page, config, creds);
+    await loginToUnanet(page, config);
     // Save session for reuse by future invocations
     await context.storageState({ path: STORAGE_STATE_FILE });
 
@@ -453,6 +505,13 @@ async function main() {
         await page.waitForTimeout(2000);
         await page.screenshot({ path: screenshotPath, fullPage: true });
         console.log(`Timesheet submitted. Screenshot at ${screenshotPath}`);
+        break;
+      }
+      case 'leave-list': {
+        const requests = await listLeaveRequests(page, config);
+        await page.screenshot({ path: screenshotPath, fullPage: true });
+        console.log(JSON.stringify(requests, null, 2));
+        console.log(`\nScreenshot saved to ${screenshotPath}`);
         break;
       }
       case 'leave': {

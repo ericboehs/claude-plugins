@@ -71,6 +71,9 @@ unanet leave --data '[{"begin":"2026-04-03","end":"2026-04-03","hours":8},{"begi
 
 # Preview leave request without saving
 unanet leave --no-save --data '{"begin":"2026-04-03","end":"2026-04-03","hours":8}'
+
+# View all current leave requests
+unanet leave-list
 ```
 
 ## Claude Code Skills
@@ -80,11 +83,10 @@ unanet leave --no-save --data '{"begin":"2026-04-03","end":"2026-04-03","hours":
 
 ## How It Works
 
-1. Retrieves Okta credentials and TOTP from 1Password via `op` CLI
-2. Launches headless Chromium via Playwright
-3. Loads saved session from `~/.config/unanet/storage-state.json` if available — skips Okta login entirely when session is still valid
-4. Falls back to full Okta SSO authentication (username → password → TOTP) if no session or session expired
-5. Saves session state after successful login for reuse by future invocations
+1. Launches headless Chromium via Playwright
+2. Loads saved session from `~/.config/unanet/storage-state.json` if available — skips Okta login entirely when session is still valid
+3. Only fetches Okta credentials (via 1Password CLI) if the session is expired and login is required
+4. Saves session state after successful login for reuse by future invocations
 6. Navigates to the Unanet timesheet and performs the requested operation
 7. Handles audit trail prompts automatically when correcting existing entries
 8. Returns JSON state and a screenshot
