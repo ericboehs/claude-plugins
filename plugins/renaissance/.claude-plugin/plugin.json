@@ -1,0 +1,9 @@
+{
+  "name": "renaissance",
+  "version": "1.0.0",
+  "description": "Check Accelerated Reader progress, completed quizzes, goals, and reading stats from Renaissance",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}

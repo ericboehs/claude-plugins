@@ -1,0 +1,503 @@
+#!/usr/bin/env node
+
+const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// --- Config ---
+
+const CONFIG_DIR = path.join(process.env.HOME, '.config', 'renaissance');
+const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
+const TMP_DIR = '/tmp';
+
+const BASE_URL = 'https://global-zone05.renaissance-go.com';
+const LOGIN_URL = 'https://login.renaissance.com';
+
+let VERBOSE = false;
+
+function loadConfig() {
+  if (!fs.existsSync(CONFIG_FILE)) {
+    console.error('No config found. Run the setup-renaissance skill first.');
+    console.error(`Expected config at: ${CONFIG_FILE}`);
+    process.exit(1);
+  }
+  return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+}
+
+function studentCookiesFile(student) {
+  return path.join(CONFIG_DIR, `cookies-${student.name.toLowerCase()}.txt`);
+}
+
+function studentTokensFile(student) {
+  return path.join(CONFIG_DIR, `tokens-${student.name.toLowerCase()}.json`);
+}
+
+// --- 1Password Credentials ---
+
+let _opSession = null;
+function opSession() {
+  if (_opSession) return _opSession;
+  const masterPass = execFileSync(
+    'security', ['find-generic-password', '-s', 'op-master', '-w'],
+    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+  ).trim();
+  _opSession = execFileSync(
+    'bash', ['-c', 'printf \'%s\' "$1" | op signin --account my --raw', '--', masterPass],
+    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+  ).trim();
+  return _opSession;
+}
+
+function getCredentials(student) {
+  if (!student.op_item) {
+    console.error(`No 1Password item configured for ${student.name}. Update config.json.`);
+    process.exit(1);
+  }
+  const env = { ...process.env, OP_SESSION_my: opSession() };
+  const username = execFileSync('op', ['item', 'get', student.op_item, '--fields', 'username', '--reveal'],
+    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env }).trim();
+  const password = execFileSync('op', ['item', 'get', student.op_item, '--fields', 'password', '--reveal'],
+    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env }).trim();
+  return { username, password };
+}
+
+// --- curl helpers (per-student cookie jar) ---
+
+function curl(cookieFile, args) {
+  const fullArgs = ['-s'];
+  if (fs.existsSync(cookieFile)) fullArgs.push('-b', cookieFile);
+  fullArgs.push('-c', cookieFile, ...args);
+  if (VERBOSE) {
+    const method = args.includes('-X') ? args[args.indexOf('-X') + 1] : (args.some(a => a === '-F' || a === '--data-urlencode' || a === '-d') ? 'POST' : 'GET');
+    const url = args.find(a => a.startsWith('http'));
+    console.error(`  ${method} ${url || args[args.length - 1]}`);
+  }
+  const result = execFileSync('curl', fullArgs, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+  if (VERBOSE) console.error(`    → ${result.length} bytes`);
+  return result;
+}
+
+function curlHeaders(cookieFile, args) {
+  const headersFile = path.join(TMP_DIR, 'renaissance-headers.txt');
+  curl(cookieFile, ['-D', headersFile, '-o', '/dev/null', ...args]);
+  return fs.readFileSync(headersFile, 'utf8');
+}
+
+function htmlUnescape(s) {
+  return s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+}
+
+function extractFormFields(html) {
+  const action = (html.match(/action="([^"]*)"/)||html.match(/action='([^']*)'/)||[])[1] || '';
+  const fields = [];
+  const re = /name=["']([^"']*)["'][^>]*value=["']([^"']*)["']/g;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    fields.push({ name: m[1], value: m[2] });
+  }
+  return { action: htmlUnescape(action), fields };
+}
+
+function followOidcChain(cookieFile, html) {
+  let maxSteps = 8;
+  while (maxSteps-- > 0) {
+    const form = extractFormFields(html);
+    if (form.action && form.fields.length > 0) {
+      const formArgs = ['-L', '--max-redirs', '5', form.action];
+      for (const f of form.fields) formArgs.push('--data-urlencode', `${f.name}=${f.value}`);
+      html = curl(cookieFile, formArgs);
+      continue;
+    }
+    const metaRefresh = html.match(/content=['"]0;url=([^'"]*)['"]/);
+    if (metaRefresh) {
+      const refreshUrl = metaRefresh[1].startsWith('http') ? metaRefresh[1] : `${BASE_URL}${metaRefresh[1]}`;
+      html = curl(cookieFile, ['-L', '--max-redirs', '5', refreshUrl]);
+      continue;
+    }
+    break;
+  }
+  return html;
+}
+
+// --- Login Flow (pure curl, no browser) ---
+
+async function login(config, student) {
+  const creds = getCredentials(student);
+  const cf = studentCookiesFile(student);
+
+  if (fs.existsSync(cf)) fs.unlinkSync(cf);
+
+  console.error(`Authenticating ${student.name}...`);
+  const tenantHtml = curl(cf, ['-L', '--max-redirs', '3', `${BASE_URL}/studentprogress/`]);
+
+  const returnUrl = htmlUnescape((tenantHtml.match(/id="returnUrl"[^>]*value="([^"]*)"/)||[])[1] || '');
+  const aft = (tenantHtml.match(/name="__RequestVerificationToken"[^>]*value="([^"]*)"/)||[])[1] || '';
+  if (!returnUrl || !aft) { console.error('Failed to get tenant form.'); process.exit(1); }
+
+  curlHeaders(cf, [
+    '-L', '--max-redirs', '15',
+    `${BASE_URL}/identityservice/sso/tenant`,
+    '--data-urlencode', `TenantRPID=${config.rpid}`,
+    '--data-urlencode', `returnUrl=${returnUrl}`,
+    '--data-urlencode', `__RequestVerificationToken=${aft}`,
+  ]);
+
+  const authState = JSON.parse(curl(cf, [`${LOGIN_URL}/auth/state`]));
+  if (!authState.csrfToken) { console.error('Failed to get auth CSRF token.'); process.exit(1); }
+
+  const authResp = JSON.parse(curl(cf, [
+    `${LOGIN_URL}/auth`,
+    '-H', `X-CSRF-TOKEN: ${authState.csrfToken}`,
+    '-H', `Origin: ${LOGIN_URL}`,
+    '-H', `Referer: ${LOGIN_URL}/auth`,
+    '-F', 'account_type=student', '-F', 'connector=local',
+    '-F', `username=${creds.username}`, '-F', `password=${creds.password}`,
+    '-F', `realm_id=${config.realm_id}`,
+  ]));
+
+  if (authResp.error) { console.error(`Login failed for ${student.name}:`, authResp.error); process.exit(1); }
+  if (!authResp.state || authResp.state.state !== 'authenticated') {
+    console.error(`Login failed for ${student.name}: unexpected response`); process.exit(1);
+  }
+
+  followOidcChain(cf, curl(cf, ['-L', '--max-redirs', '15', `${LOGIN_URL}/auth/redirect`]));
+  followOidcChain(cf, curl(cf, ['-L', '--max-redirs', '10', `${BASE_URL}/studentprogress/`]));
+
+  const cookies = fs.existsSync(cf) ? fs.readFileSync(cf, 'utf8') : '';
+  if (!cookies.includes('.AspNetCore.Cookies')) {
+    console.error(`Login failed for ${student.name}: no session cookies.`); process.exit(1);
+  }
+
+  const tokenData = { userId: student.user_id, clientId: config.client_id, name: student.name };
+  fs.writeFileSync(studentTokensFile(student), JSON.stringify(tokenData, null, 2));
+
+  console.error(`${student.name} logged in.`);
+  return tokenData;
+}
+
+// --- API helpers ---
+
+function loadTokens(student) {
+  const tf = studentTokensFile(student);
+  if (!fs.existsSync(tf)) return null;
+  return JSON.parse(fs.readFileSync(tf, 'utf8'));
+}
+
+function apiCall(cookieFile, method, urlPath, body = null) {
+  const args = ['-H', 'Content-Type: application/json'];
+  if (method === 'POST' && body) args.push('-X', 'POST', '-d', JSON.stringify(body));
+  args.push(`${BASE_URL}${urlPath}`);
+  const resp = curl(cookieFile, args);
+  if (!resp || resp.includes('Account/Login') || resp.includes('identityservice/sso')) return null;
+  try { return JSON.parse(resp); } catch { return null; }
+}
+
+function graphql(cookieFile, tokens, operationName, query, variables) {
+  const urlPath = `/studentprogress/api/GraphQl/GetStudentData/clientId/${tokens.clientId}/userId/gs_${tokens.userId}`;
+  return apiCall(cookieFile, 'POST', urlPath, { operationName, namedQuery: '', query, variables });
+}
+
+// --- Data fetching ---
+
+async function ensureAuth(config, student) {
+  const cf = studentCookiesFile(student);
+  let tokens = loadTokens(student);
+  if (!tokens || !fs.existsSync(cf)) {
+    tokens = await login(config, student);
+  }
+  const test = apiCall(cf, 'GET', `/studentprogress/api/MarkingPeriod/client/${config.client_id}/school/${config.school_id}`);
+  if (!test) {
+    console.error(`Session expired for ${student.name}, re-authenticating...`);
+    tokens = await login(config, student);
+  }
+  return tokens;
+}
+
+async function getCurrentMarkingPeriod(cookieFile, config) {
+  const periods = apiCall(cookieFile, 'GET', `/studentprogress/api/MarkingPeriod/client/${config.client_id}/school/${config.school_id}`);
+  if (!periods) return null;
+  const now = Date.now();
+  const grading = periods.filter(p => p.periodType === 'CLNDR_GRADINGPERIOD');
+  return grading.find(p => p.startDateLong <= now && p.endDateLong >= now) || grading[grading.length - 1];
+}
+
+async function getGoals(config, student) {
+  const tokens = await ensureAuth(config, student);
+  const cf = studentCookiesFile(student);
+  const mp = await getCurrentMarkingPeriod(cf, config);
+  if (!mp) { console.error('Failed to get marking periods'); process.exit(1); }
+
+  const query = `query studentGoalSummaryQuery($studentId: String, $assignmentTypes: [String]!, $activityTypes: [String]!, $readingEnglishSTARAssignmentTypes: [String]!, $readingEnglishSTARActivityTypes: [String]!, $startDate: String!, $endDate: String!, $wordCountActivityTypes: [String]!) {
+  district { students(ids: [$studentId]) { id formattedName(format: LAST_FIRST)
+    assignmentSummary(assignmentTypes: $assignmentTypes, activityTypes: $activityTypes, wordCountActivityTypes: $wordCountActivityTypes, startDate: $startDate, endDate: $endDate) {
+      countEngagedMinutes averageDifficultyLevel countActivitiesTaken countPassedOrCompleted
+      countWordsRead averagePercentCorrect countEngagementPointsAchieved percentFiction percentNonFiction }
+    latestEnglishSTARReadingActivity: activities(limit: 1, assignmentTypes: $readingEnglishSTARAssignmentTypes, activityTypes: $readingEnglishSTARActivityTypes, startDate: $startDate, endDate: $endDate) {
+      score(sourceScale:SCLTYP_RASCH, targetScale:SCLTYP_UNIFIED) { value displayValue }
+      lexileRange { displayValue } zpdRange } } } }`;
+
+  const sd = mp.startDate.split('T')[0], ed = mp.endDate.split('T')[0];
+  const variables = {
+    studentId: `gs_${tokens.userId}`, startDate: sd, endDate: ed,
+    assignmentTypes: ['ASNTYP_AR', 'ASNTYP_AROR', 'ASNTYP_ARRP', 'ASNTYP_AR360ARQ', 'ASNTYP_AR360ASPQ'],
+    activityTypes: ['ATVTYP_READINGPRACTICEQUIZ', 'ATVTYP_OTHERREADINGQUIZ', 'ATVTYP_ARTICLEQUIZ'],
+    readingEnglishSTARAssignmentTypes: ['ASNTYP_SRENE'], readingEnglishSTARActivityTypes: ['ATVTYP_SRENE'],
+    wordCountActivityTypes: ['ATVTYP_AR', 'ATVTYP_OTHERREADINGQUIZ', 'ATVTYP_READINGPRACTICEQUIZ', 'ATVTYP_AR360READ', 'ATVTYP_ARTICLEQUIZ'],
+  };
+
+  const data = graphql(cf, tokens, 'studentGoalSummaryQuery', query, variables);
+  const irGoals = apiCall(cf, 'POST', '/studentprogress/api/goal/GetIndependentReaderGoals', {
+    clientId: tokens.clientId, userGroupId: `gs_${tokens.userId}`, limit: '100',
+    startDate: new Date(mp.startDate).toUTCString(), endDate: new Date(mp.endDate).toUTCString(),
+    activityTypefilter: ['ATVTYP_AR', 'ATVTYP_LITERACYSKILLSQUIZ', 'ATVTYP_OTHERREADINGQUIZ', 'ATVTYP_READINGPRACTICEQUIZ', 'ATVTYP_VOCABULARYPRACTICEQUIZ', 'ATVTYP_AR360READ', 'ATVTYP_ARTICLEQUIZ'],
+    accademicSessionIds: [mp.renaissanceId],
+  });
+  const ranges = apiCall(cf, 'GET', `/studentprogress/api/GraphQl/GetStudentReadingRanges/userId/gs_${tokens.userId}/markingPeriod/${mp.renaissanceId}`);
+
+  return { data, goals: irGoals, ranges, mp };
+}
+
+async function getCompletedWork(config, student, { startDate, endDate, all, limit, detail } = {}) {
+  const tokens = await ensureAuth(config, student);
+  const cf = studentCookiesFile(student);
+  const query = `query myCompletedWorkQuery($studentId: String, $assignmentTypes: [String]!, $activityTypes: [String]!, $startDate: String!, $endDate: String!) {
+  district { students(ids: [$studentId]) { id
+    assignmentSummary(assignmentTypes: $assignmentTypes, activityTypes: $activityTypes, startDate: $startDate, endDate: $endDate) { countEngagementPointsAchieved }
+    activities(limit: 10000, assignmentTypes: $assignmentTypes, activityTypes: $activityTypes, startDate: $startDate, endDate: $endDate) {
+      id activityTypeName completedDate percentCorrect resource { title author quizNumber } } } } }`;
+
+  const variables = {
+    studentId: `gs_${tokens.userId}`, startDate: startDate || '2016-01-01', endDate: endDate || new Date().toISOString().split('T')[0],
+    assignmentTypes: ['ASNTYP_ARLS', 'ASNTYP_AROR', 'ASNTYP_ARRP', 'ASNTYP_ARVP', 'ASNTYP_AR360AQ', 'ASNTYP_AR360ARQ'],
+    activityTypes: ['ATVTYP_AR', 'ATVTYP_LITERACYSKILLSQUIZ', 'ATVTYP_OTHERREADINGQUIZ', 'ATVTYP_READINGPRACTICEQUIZ', 'ATVTYP_VOCABULARYPRACTICEQUIZ', 'ATVTYP_AR360READ', 'ATVTYP_ARTICLEQUIZ'],
+  };
+  const data = graphql(cf, tokens, 'myCompletedWorkQuery', query, variables);
+  if (!data) return null;
+
+  // Determine which activities to enrich with detail
+  const activities = data.data.district.students[0].activities;
+  const sorted = activities.slice().sort((a, b) => new Date(b.completedDate) - new Date(a.completedDate));
+  const count = all ? sorted.length : (limit || 10);
+  const displayItems = sorted.slice(0, count);
+
+  // Fetch per-quiz details (points, ATOS, word count) only with --detail flag
+  const details = {};
+  if (!detail) return { data, details };
+  if (!VERBOSE) process.stderr.write('Retrieving');
+  for (const a of displayItems) {
+    if (!VERBOSE) process.stderr.write('.');
+    const info = apiCall(cf, 'GET', `/studentprogress/AssignmentPlatformService/resultsinfo/${a.id}`);
+    if (info) {
+      const gr = info.activity?.gradingResults?.extendedProperties || {};
+      const bi = info.activity?.context?.data?.bookInfo || {};
+      details[a.id] = {
+        pointsEarned: gr.pointsEarned ?? null,
+        pointsMax: bi.points ?? null,
+        passed: gr.passed ?? null,
+        wordsRead: gr.wordsRead ?? null,
+        atosLevel: bi.atosLevel ?? null,
+        lexileLevel: bi.lexileLevel ?? null,
+        wordCount: bi.wordCount ?? null,
+        interestLevel: bi.interestLevel ?? null,
+      };
+    }
+  }
+  if (!VERBOSE) process.stderr.write('\n');
+
+  return { data, details };
+}
+
+// --- Display ---
+
+// ANSI color helpers
+const c = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  blue: '\x1b[34m',
+  green: '\x1b[32m',
+  red: '\x1b[31m',
+  yellow: '\x1b[33m',
+  cyan: '\x1b[36m',
+  boldBlue: '\x1b[1;34m',
+  boldGreen: '\x1b[1;32m',
+  boldRed: '\x1b[1;31m',
+  boldYellow: '\x1b[1;33m',
+};
+const no = process.env.NO_COLOR || !process.stdout.isTTY;
+const col = (color, text) => no ? text : `${color}${text}${c.reset}`;
+
+function scoreColor(pct) {
+  if (pct >= 90) return c.boldGreen;
+  if (pct >= 80) return c.green;
+  if (pct >= 70) return c.yellow;
+  return c.boldRed;
+}
+
+function formatGoals({ data, goals, ranges, mp }) {
+  const lines = [];
+  const student = data.data.district.students[0];
+  const summary = student.assignmentSummary;
+  const name = student.formattedName.replace('_', ', ');
+  const star = student.latestEnglishSTARReadingActivity;
+
+  lines.push(col(c.boldBlue, `${name}`) + ` — Star Reading: ${col(c.boldGreen, star?.[0]?.score?.displayValue || 'N/A')}`);
+  if (star?.[0]) {
+    lines.push(`  Lexile: ${star[0].lexileRange.displayValue} | ZPD: ${star[0].zpdRange}${ranges?.englishLowerAtos ? ` | ATOS: ${ranges.englishLowerAtos} - ${ranges.englishUpperAtos}` : ''}`);
+  }
+  lines.push('');
+  lines.push(col(c.bold, 'Goals:'));
+  if (goals?.length > 0) {
+    const pg = goals.find(g => g.metric === 'GLM_ENGAGEPOINTS');
+    if (pg) {
+      const onTrack = pg.status === 'GLS_ONTRACK';
+      const status = onTrack ? col(c.boldGreen, 'ON TRACK') : col(c.boldRed, 'NOT ON TRACK');
+      lines.push(`  Points:     ${pg.currentValue} / ${pg.targetValue} (${Math.round(pg.currentValue/pg.targetValue*100)}%) — ${status}`);
+    }
+    const ag = goals.find(g => g.metric === 'GLM_PCTCORRECT');
+    if (ag) {
+      const onTrack = ag.status === 'GLS_ONTRACK';
+      const status = onTrack ? col(c.boldGreen, 'ON TRACK') : col(c.boldRed, 'NOT ON TRACK');
+      lines.push(`  % Correct:  ${Math.round(ag.currentValue)}% / ${Math.round(ag.targetValue)}%       — ${status}`);
+    }
+  }
+  lines.push('');
+  lines.push(col(c.bold, 'This Period:'));
+  lines.push(`  Quizzes: ${summary.countActivitiesTaken} taken, ${summary.countPassedOrCompleted} passed | Words Read: ${col(c.cyan, summary.countWordsRead.toLocaleString())}`);
+  lines.push(`  Avg Difficulty: ${summary.averageDifficultyLevel} | ${Math.round(summary.percentFiction * 100)}% Fiction | Avg % Correct: ${col(scoreColor(Math.round(summary.averagePercentCorrect * 100)), Math.round(summary.averagePercentCorrect * 100) + '%')}`);
+  lines.push(col(c.dim, `  Period: ${mp.description} (${mp.startDate.split('T')[0]} to ${mp.endDate.split('T')[0]})`));
+  return lines.join('\n');
+}
+
+function formatBooks({ data, details }, { all, limit, detail }) {
+  const student = data.data.district.students[0];
+  const activities = student.activities;
+  const hasDetails = detail && Object.keys(details).length > 0;
+  const lines = [];
+  lines.push(`Total Points: ${col(c.cyan, student.assignmentSummary.countEngagementPointsAchieved)} | Total Quizzes: ${activities.length}`);
+  lines.push('');
+  const sorted = activities.slice().sort((a, b) => new Date(b.completedDate) - new Date(a.completedDate));
+  const count = all ? sorted.length : (limit || 10);
+  const items = sorted.slice(0, count);
+  lines.push(`${all ? 'All' : 'Recent'} Quizzes:`);
+  if (hasDetails) {
+    lines.push(col(c.dim, `  ${'Title'.padEnd(35)} ${'Score'.padEnd(6)} ${'Pts'.padEnd(7)} ${'ATOS'.padEnd(5)} Date`));
+    lines.push(col(c.dim, `  ${'-'.repeat(35)} ${'-'.repeat(6)} ${'-'.repeat(7)} ${'-'.repeat(5)} ${'-'.repeat(12)}`));
+  } else {
+    lines.push(col(c.dim, `  ${'Title'.padEnd(42)} ${'Score'.padEnd(6)} Date`));
+    lines.push(col(c.dim, `  ${'-'.repeat(42)} ${'-'.repeat(6)} ${'-'.repeat(12)}`));
+  }
+  for (const a of items) {
+    const pct = Math.round(a.percentCorrect * 100);
+    const date = new Date(a.completedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    if (hasDetails) {
+      const title = a.resource.title.length > 33 ? a.resource.title.substring(0, 32) + '…' : a.resource.title;
+      const d = details[a.id];
+      const pts = d?.pointsEarned != null ? `${d.pointsEarned}/${d.pointsMax}` : '';
+      const atos = d?.atosLevel != null ? String(d.atosLevel) : '';
+      lines.push(`  ${title.padEnd(35)} ${col(scoreColor(pct), String(pct + '%').padEnd(6))} ${pts.padEnd(7)} ${atos.padEnd(5)} ${col(c.dim, date)}`);
+    } else {
+      const title = a.resource.title.length > 40 ? a.resource.title.substring(0, 39) + '…' : a.resource.title;
+      lines.push(`  ${title.padEnd(42)} ${col(scoreColor(pct), String(pct + '%').padEnd(6))} ${col(c.dim, date)}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+// --- Student selection ---
+
+function matchStudents(config, filter) {
+  const students = config.students || [];
+  if (!filter) return students.filter(s => s.user_id); // all configured students
+  const lower = filter.toLowerCase();
+  const matched = students.filter(s => s.name.toLowerCase().includes(lower));
+  if (matched.length === 0) {
+    console.error(`No student matching "${filter}". Available: ${students.map(s => s.name).join(', ')}`);
+    process.exit(1);
+  }
+  return matched;
+}
+
+// --- CLI ---
+
+async function main() {
+  const args = process.argv.slice(2);
+  const command = args[0];
+
+  if (!command || command === '--help') {
+    console.log(`Usage: renaissance <command> [student] [options]
+
+Commands:
+  goals [student]        Show AR goals and progress for current marking period
+  books [student] [N]    Show completed quizzes (default 10, or N, or --all)
+                         Add --detail (-d) for points earned and ATOS level
+  login [student]        Force re-authentication (all students if omitted)
+  json [goals|books] [student]  Output raw JSON data
+
+Student filter:
+  "allie" or "layla" (partial, case-insensitive)
+  Omit to show all students
+
+Examples:
+  renaissance goals
+  renaissance goals allie
+  renaissance books layla
+  renaissance books allie 20
+  renaissance books layla -d
+  renaissance books --all
+  renaissance login allie`);
+    process.exit(0);
+  }
+
+  const config = loadConfig();
+
+  // Parse args: flags, student filter, and numeric limit
+  const flags = args.filter(a => a.startsWith('-'));
+  const positional = args.slice(1).filter(a => !a.startsWith('-'));
+  const allFlag = flags.includes('--all');
+  const detailFlag = flags.includes('--detail') || flags.includes('-d');
+  VERBOSE = flags.includes('--verbose') || flags.includes('-v');
+  const studentFilter = positional.find(a => !/^\d+$/.test(a));
+  const limit = parseInt(positional.find(a => /^\d+$/.test(a))) || null;
+
+  switch (command) {
+    case 'goals': {
+      const students = matchStudents(config, studentFilter);
+      for (let i = 0; i < students.length; i++) {
+        if (i > 0) console.log('');
+        console.log(formatGoals(await getGoals(config, students[i])));
+      }
+      break;
+    }
+    case 'books': {
+      const students = matchStudents(config, studentFilter);
+      for (let i = 0; i < students.length; i++) {
+        if (i > 0) console.log('');
+        if (students.length > 1) console.log(`--- ${students[i].name} ---`);
+        const opts = { all: allFlag, limit, detail: detailFlag };
+        console.log(formatBooks(await getCompletedWork(config, students[i], opts), opts));
+      }
+      break;
+    }
+    case 'login': {
+      const students = matchStudents(config, studentFilter);
+      for (const s of students) await login(config, s);
+      break;
+    }
+    case 'json': {
+      const sub = positional[0] || 'goals';
+      const jsonStudentFilter = positional[1];
+      const students = matchStudents(config, jsonStudentFilter);
+      const results = {};
+      for (const s of students) {
+        if (sub === 'goals') results[s.name] = await getGoals(config, s);
+        else if (sub === 'books') results[s.name] = await getCompletedWork(config, s, { all: allFlag, limit, detail: detailFlag });
+      }
+      console.log(JSON.stringify(results, null, 2));
+      break;
+    }
+    default: console.error(`Unknown command: ${command}`); process.exit(1);
+  }
+}
+
+main().catch(err => { console.error(`Error: ${err.message}`); process.exit(1); });
