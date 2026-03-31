@@ -1,9 +1,0 @@
-{
-  "name": "renaissance-cli",
-  "version": "0.1.0",
-  "description": "CLI for checking Accelerated Reader progress from Renaissance",
-  "bin": {
-    "renaissance": "./bin/renaissance"
-  },
-  "dependencies": {}
-}

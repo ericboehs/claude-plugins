@@ -11,9 +11,9 @@ Uses pure curl for authentication (no browser/Playwright needed). Supports multi
 
 ## Steps
 
-1. **Link the CLI:**
+1. **Symlink the CLI:**
 ```bash
-cd /Users/ericboehs/Code/ericboehs/claude-plugins/plugins/renaissance && npm link
+ln -sf /Users/ericboehs/Code/ericboehs/claude-plugins/plugins/renaissance/bin/renaissance /usr/local/bin/renaissance
 ```
 
 2. **Create config directory:**
