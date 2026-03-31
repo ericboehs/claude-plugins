@@ -163,6 +163,9 @@ async function login(config, student) {
   followOidcChain(cf, curl(cf, ['-L', '--max-redirs', '15', `${LOGIN_URL}/auth/redirect`]));
   followOidcChain(cf, curl(cf, ['-L', '--max-redirs', '10', `${BASE_URL}/studentprogress/`]));
 
+  // Also establish SDP session (needed for book search bearer token)
+  followOidcChain(cf, curl(cf, ['-L', '--max-redirs', '10', `${BASE_URL}/sdp/`]));
+
   const cookies = fs.existsSync(cf) ? fs.readFileSync(cf, 'utf8') : '';
   if (!cookies.includes('.AspNetCore.Cookies')) {
     console.error(`Login failed for ${student.name}: no session cookies.`); process.exit(1);
@@ -195,6 +198,52 @@ function apiCall(cookieFile, method, urlPath, body = null) {
 function graphql(cookieFile, tokens, operationName, query, variables) {
   const urlPath = `/studentprogress/api/GraphQl/GetStudentData/clientId/${tokens.clientId}/userId/gs_${tokens.userId}`;
   return apiCall(cookieFile, 'POST', urlPath, { operationName, namedQuery: '', query, variables });
+}
+
+function getSdpToken(cookieFile) {
+  const resp = curl(cookieFile, [`${BASE_URL}/sdp/api/authorization/refreshtoken`]);
+  try {
+    return JSON.parse(resp).access_token;
+  } catch {
+    return null;
+  }
+}
+
+function searchBooks(cookieFile, tokens, query, limit = 10) {
+  const token = getSdpToken(cookieFile);
+  if (!token) return null;
+  const args = [
+    '-X', 'POST',
+    '-H', 'Content-Type: application/json',
+    '-H', `Authorization: bearer ${token}`,
+    '-H', `RLI-ClientId: ${tokens.clientId}`,
+    `${BASE_URL}/recommendationservice/Search/V1/InstructionalResources`,
+    '-d', JSON.stringify({
+      query,
+      context: {
+        configurationId: 'AR-STUDENT-SEARCH',
+        clientId: tokens.clientId,
+        locale: 'en-US',
+        schoolGuid: '6e86d58e-91b4-4b66-8620-a24a71751415',
+        userGuid: `${tokens.userId}`,
+      },
+      filters: [
+        { fieldRefId: 'rollUpTags_LANGU', booleanOperation: 'OR', tagOperation: 'AtUnder', values: ['LANGU_ENG'] },
+        { booleanOperation: 'OR', fieldRefId: 'rollUpTags', tagOperation: 'AtUnder', values: ['CTCAT_ARBOOK'] },
+      ],
+      facets: [],
+      limits: { rows: limit, start: 0 },
+      orderings: [],
+    }),
+  ];
+  // Search API doesn't need session cookies, just bearer token
+  const fullArgs = ['-s', ...args];
+  if (VERBOSE) {
+    console.error(`  POST ${BASE_URL}/recommendationservice/Search/V1/InstructionalResources`);
+  }
+  const resp = execFileSync('curl', fullArgs, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+  if (VERBOSE) console.error(`    → ${resp.length} bytes`);
+  try { return JSON.parse(resp); } catch { return null; }
 }
 
 // --- Data fetching ---
@@ -404,6 +453,26 @@ function formatBooks({ data, details }, { all, limit, detail }) {
   return lines.join('\n');
 }
 
+function formatSearch(data) {
+  if (!data || !data.results) return 'No results.';
+  const lines = [];
+  lines.push(`${col(c.cyan, data.count)} results found\n`);
+  for (const r of data.results) {
+    const atos = r.atosLevel ?? '?';
+    const pts = r.points ?? '?';
+    const lexile = r.lexileLevel || '?';
+    const il = r.tag_INTLV || '?';
+    const fn = r.tag_FICTN || '?';
+
+    lines.push(col(c.boldBlue, r.title));
+    lines.push(`  by ${r.author?.join(', ') || '?'}`);
+    lines.push(`  ATOS: ${col(c.bold, atos)} | Pts: ${col(c.cyan, pts)} | Lexile: ${lexile} | ${fn} | IL: ${il} | Quiz #${r.quizNumber || '?'}`);
+    if (r.description) lines.push(col(c.dim, `  ${r.description.substring(0, 120)}${r.description.length > 120 ? '…' : ''}`));
+    lines.push('');
+  }
+  return lines.join('\n').trimEnd();
+}
+
 // --- Student selection ---
 
 function matchStudents(config, filter) {
@@ -431,6 +500,7 @@ Commands:
   goals [student]        Show AR goals and progress for current marking period
   books [student] [N]    Show completed quizzes (default 10, or N, or --all)
                          Add --detail (-d) for points earned and ATOS level
+  search <query>         Search AR books by title/author
   login [student]        Force re-authentication (all students if omitted)
   json [goals|books] [student]  Output raw JSON data
 
@@ -441,10 +511,8 @@ Student filter:
 Examples:
   renaissance goals
   renaissance goals allie
-  renaissance books layla
-  renaissance books allie 20
   renaissance books layla -d
-  renaissance books --all
+  renaissance search "diary of a wimpy kid"
   renaissance login allie`);
     process.exit(0);
   }
@@ -457,7 +525,7 @@ Examples:
   const allFlag = flags.includes('--all');
   const detailFlag = flags.includes('--detail') || flags.includes('-d');
   VERBOSE = flags.includes('--verbose') || flags.includes('-v');
-  const studentFilter = positional.find(a => !/^\d+$/.test(a));
+  const studentFilter = command === 'search' ? null : positional.find(a => !/^\d+$/.test(a));
   const limit = parseInt(positional.find(a => /^\d+$/.test(a))) || null;
 
   switch (command) {
@@ -477,6 +545,19 @@ Examples:
         const opts = { all: allFlag, limit, detail: detailFlag };
         console.log(formatBooks(await getCompletedWork(config, students[i], opts), opts));
       }
+      break;
+    }
+    case 'search': {
+      const query = positional.join(' ');
+      if (!query) { console.error('Usage: renaissance search <query>'); process.exit(1); }
+      // Use first configured student for search auth
+      const student = (config.students || []).find(s => s.user_id);
+      if (!student) { console.error('No student configured.'); process.exit(1); }
+      const tokens = await ensureAuth(config, student);
+      const cf = studentCookiesFile(student);
+      const data = searchBooks(cf, tokens, query, limit || 10);
+      if (!data) { console.error('Search failed. Try: renaissance login'); process.exit(1); }
+      console.log(formatSearch(data));
       break;
     }
     case 'login': {
