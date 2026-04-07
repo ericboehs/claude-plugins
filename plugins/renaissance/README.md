@@ -5,9 +5,8 @@ Check Accelerated Reader progress, quiz scores, reading goals, and search for AR
 ## Prerequisites
 
 - Node.js 18+ (for JSON parsing only — no npm packages)
-- [1Password CLI](https://developer.1password.com/docs/cli/) (`op`)
+- [fnox](https://github.com/jdx/fnox) — secret management (installed via `mise install fnox`)
 - `curl`
-- macOS Keychain with 1Password master password (service: `op-master`)
 
 ## Setup
 
@@ -24,16 +23,31 @@ cat > ~/.config/renaissance/config.json << 'EOF'
   "rpid": "YOUR-RPID",
   "client_id": "YOUR_CLIENT_ID",
   "students": [
-    { "name": "Kid1", "op_item": "1PASSWORD_ITEM_ID", "user_id": "STUDENT_ROSTER_UUID" },
-    { "name": "Kid2", "op_item": "1PASSWORD_ITEM_ID", "user_id": "" }
+    { "name": "Kid1", "credentials_key": "KID1", "user_id": "STUDENT_ROSTER_UUID" },
+    { "name": "Kid2", "credentials_key": "KID2", "user_id": "" }
   ]
 }
 EOF
+
+# Store credentials in fnox (one per student, using keychain provider)
+fnox set RENAISSANCE_KID1_USERNAME "student_username" --provider keychain --global
+fnox set RENAISSANCE_KID1_PASSWORD "student_password" --provider keychain --global
 
 # Login and test
 renaissance login
 renaissance goals
 ```
+
+### Credential format
+
+Environment variables are keyed by `credentials_key` from config.json:
+
+| `credentials_key` | Username env var | Password env var |
+|-------------------|-----------------|-----------------|
+| `KID1` | `RENAISSANCE_KID1_USERNAME` | `RENAISSANCE_KID1_PASSWORD` |
+| `KID2` | `RENAISSANCE_KID2_USERNAME` | `RENAISSANCE_KID2_PASSWORD` |
+
+The script auto-wraps itself with `fnox exec` if secrets aren't in the environment, so no shell activation is needed.
 
 ## Usage
 
@@ -80,7 +94,8 @@ renaissance json books layla -d
 - **Data:** GraphQL API + REST endpoints via `curl` with session cookies
 - **Search:** Bearer token from SDP + recommendation service API
 - **Session:** Cookies cached per-student at `~/.config/renaissance/cookies-{name}.txt`
-- **Dependencies:** Zero. Only Node.js built-ins (`child_process`, `fs`, `path`) + `curl` + `op`
+- **Secrets:** `fnox exec` injects credentials from macOS Keychain (no biometric prompt)
+- **Dependencies:** Zero npm packages. Only Node.js built-ins (`child_process`, `fs`, `path`) + `curl` + `fnox`
 
 ### Auth Flow
 

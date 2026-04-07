@@ -1,7 +1,16 @@
 #!/usr/bin/env node
 
+// Re-exec under fnox if secrets aren't loaded
+if (!process.env.WENGAGE_USERNAME) {
+  const { execFileSync } = require('child_process');
+  try {
+    execFileSync('fnox', ['exec', '--', 'node', __filename, ...process.argv.slice(2)],
+      { stdio: 'inherit' });
+  } catch (e) { process.exit(e.status || 1); }
+  process.exit(0);
+}
+
 const { chromium } = require('playwright');
-const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -21,40 +30,17 @@ function loadConfig() {
   return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
 }
 
-// --- Credentials via 1Password CLI ---
+// --- Credentials via environment variables (fnox keychain) ---
 
-function opSignIn() {
-  try {
-    const masterPass = execFileSync(
-      'security', ['find-generic-password', '-s', 'op-master', '-w'],
-      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-    ).trim();
-    const sessionToken = execFileSync(
-      'bash', ['-c', 'printf \'%s\' "$1" | op signin --account my --raw', '--', masterPass],
-      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-    ).trim();
-    return sessionToken;
-  } catch {
-    console.error('Failed to sign in to 1Password.');
+function getCredentials() {
+  const username = process.env.WENGAGE_USERNAME;
+  const password = process.env.WENGAGE_PASSWORD;
+  if (!username || !password) {
+    console.error('Missing WENGAGE_USERNAME or WENGAGE_PASSWORD env vars.');
+    console.error('Set them with: fnox set WENGAGE_USERNAME --provider keychain --global');
     process.exit(1);
   }
-}
-
-function opGetField(sessionToken, itemId, field) {
-  const env = { ...process.env, OP_SESSION_my: sessionToken };
-  return execFileSync(
-    'op', ['item', 'get', itemId, '--fields', field, '--reveal'],
-    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env }
-  ).trim();
-}
-
-function getCredentials(config) {
-  const sessionToken = opSignIn();
-  const itemId = config.op_item;
-  return {
-    username: opGetField(sessionToken, itemId, 'username'),
-    password: opGetField(sessionToken, itemId, 'password'),
-  };
+  return { username, password };
 }
 
 // --- Login ---
@@ -109,7 +95,7 @@ async function authenticatedFetch(url, config, options = {}) {
 
   // Need fresh login
   console.error('Session expired, logging in...');
-  const creds = getCredentials(config);
+  const creds = getCredentials();
   cookies = await login(config, creds);
   return fetchWithCookies(url, cookies, options);
 }
@@ -173,12 +159,18 @@ async function getSessionAndStudents(config) {
   return { sessionId, students, studentIds };
 }
 
+function parseBalance(html, label) {
+  const pattern = new RegExp(`${label}[\\s\\S]*?\\(?\\$([0-9.]+)\\)?`);
+  const match = html.match(pattern);
+  if (!match) return 'N/A';
+  const isNegative = html.match(new RegExp(`${label}[\\s\\S]*?\\(\\$[0-9.]+\\)`));
+  return isNegative ? `-$${match[1]}` : `$${match[1]}`;
+}
+
 function parseSummary(html) {
-  const lunchMatch = html.match(/Lunch Room Balance[\s\S]*?\$([0-9.]+)/);
-  const feeMatch = html.match(/Fee Balance[\s\S]*?\$([0-9.]+)/);
   return {
-    lunchBalance: lunchMatch ? `$${lunchMatch[1]}` : 'N/A',
-    feeBalance: feeMatch ? `$${feeMatch[1]}` : 'N/A',
+    lunchBalance: parseBalance(html, 'Lunch Room Balance'),
+    feeBalance: parseBalance(html, 'Fee Balance'),
   };
 }
 

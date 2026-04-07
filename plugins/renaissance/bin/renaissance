@@ -1,5 +1,15 @@
 #!/usr/bin/env node
 
+// Re-exec under fnox if secrets aren't loaded
+if (!process.env.RENAISSANCE_KID1_USERNAME) {
+  const { execFileSync } = require('child_process');
+  try {
+    execFileSync('fnox', ['exec', '--', 'node', __filename, ...process.argv.slice(2)],
+      { stdio: 'inherit' });
+  } catch (e) { process.exit(e.status || 1); }
+  process.exit(0);
+}
+
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -32,32 +42,22 @@ function studentTokensFile(student) {
   return path.join(CONFIG_DIR, `tokens-${student.name.toLowerCase()}.json`);
 }
 
-// --- 1Password Credentials ---
-
-let _opSession = null;
-function opSession() {
-  if (_opSession) return _opSession;
-  const masterPass = execFileSync(
-    'security', ['find-generic-password', '-s', 'op-master', '-w'],
-    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-  ).trim();
-  _opSession = execFileSync(
-    'bash', ['-c', 'printf \'%s\' "$1" | op signin --account my --raw', '--', masterPass],
-    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-  ).trim();
-  return _opSession;
-}
+// --- Credentials via environment variables (fnox keychain) ---
 
 function getCredentials(student) {
-  if (!student.op_item) {
-    console.error(`No 1Password item configured for ${student.name}. Update config.json.`);
+  const key = student.credentials_key;
+  if (!key) {
+    console.error(`No credentials_key configured for ${student.name}. Update config.json.`);
     process.exit(1);
   }
-  const env = { ...process.env, OP_SESSION_my: opSession() };
-  const username = execFileSync('op', ['item', 'get', student.op_item, '--fields', 'username', '--reveal'],
-    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env }).trim();
-  const password = execFileSync('op', ['item', 'get', student.op_item, '--fields', 'password', '--reveal'],
-    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env }).trim();
+  const prefix = `RENAISSANCE_${key}`;
+  const username = process.env[`${prefix}_USERNAME`];
+  const password = process.env[`${prefix}_PASSWORD`];
+  if (!username || !password) {
+    console.error(`Missing ${prefix}_USERNAME or ${prefix}_PASSWORD env vars.`);
+    console.error(`Set them with: fnox set ${prefix}_USERNAME --provider keychain --global`);
+    process.exit(1);
+  }
   return { username, password };
 }
 
