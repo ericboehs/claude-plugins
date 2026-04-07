@@ -5,9 +5,10 @@ Automate Unanet timesheet entry and leave requests via Playwright browser automa
 ## Prerequisites
 
 - **Node.js** (v18+)
-- **1Password CLI** (`op`) with biometric unlock enabled
+- **[fnox](https://github.com/jdx/fnox)** — secret management (installed via `mise install fnox`)
+- **1Password CLI** (`op`) with biometric unlock — needed only for TOTP codes
 - **Playwright** (`npx playwright install chromium` after `npm install`)
-- A 1Password item containing your Okta credentials (username, password, TOTP)
+- A 1Password item containing your Okta TOTP secret
 
 ## Setup
 
@@ -16,6 +17,10 @@ Install the plugin, then run `/setup-unanet` to configure credentials and create
 Or manually:
 
 ```bash
+# Store credentials in fnox (keychain provider)
+fnox set UNANET_USERNAME "your_okta_username" --provider keychain --global
+fnox set UNANET_PASSWORD "your_okta_password" --provider keychain --global
+
 # Create config
 mkdir -p ~/.config/unanet
 cat > ~/.config/unanet/config.json <<EOF
@@ -32,6 +37,8 @@ cd plugins/unanet && npm install
 npx playwright install chromium
 ln -sf "$(pwd)/bin/unanet" ~/bin/unanet
 ```
+
+Note: `op_item` is only used for TOTP code generation during Okta MFA. Username and password come from fnox keychain env vars.
 
 ## CLI Usage
 
@@ -85,8 +92,8 @@ unanet leave-list
 
 1. Launches headless Chromium via Playwright
 2. Loads saved session from `~/.config/unanet/storage-state.json` if available — skips Okta login entirely when session is still valid
-3. Only fetches Okta credentials (via 1Password CLI) if the session is expired and login is required
+3. Only fetches Okta credentials (from fnox keychain env vars) and TOTP (from 1Password via `op --otp`) if the session is expired and login is required
 4. Saves session state after successful login for reuse by future invocations
-6. Navigates to the Unanet timesheet and performs the requested operation
-7. Handles audit trail prompts automatically when correcting existing entries
-8. Returns JSON state and a screenshot
+5. Navigates to the Unanet timesheet and performs the requested operation
+6. Handles audit trail prompts automatically when correcting existing entries
+7. Returns JSON state and a screenshot

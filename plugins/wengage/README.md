@@ -5,9 +5,8 @@ Check student grades, attendance, assignments, and lunch balances from the Wenga
 ## Prerequisites
 
 - Node.js 18+
-- [1Password CLI](https://developer.1password.com/docs/cli/) (`op`)
+- [fnox](https://github.com/jdx/fnox) — secret management (installed via `mise install fnox`)
 - Playwright (`npm install` in this directory)
-- macOS Keychain with 1Password master password (service: `op-master`)
 
 ## Setup
 
@@ -15,12 +14,15 @@ Check student grades, attendance, assignments, and lunch balances from the Wenga
 # Install dependencies
 cd plugins/wengage && npm install
 
-# Create config (students are auto-discovered from the portal)
+# Store credentials in fnox (keychain provider)
+fnox set WENGAGE_USERNAME "your_username" --provider keychain --global
+fnox set WENGAGE_PASSWORD "your_password" --provider keychain --global
+
+# Create config
 mkdir -p ~/.config/wengage
 cat > ~/.config/wengage/config.json << 'EOF'
 {
-  "url": "https://ok.wengage.com/YourDistrict",
-  "op_item": "YOUR_1PASSWORD_ITEM_ID"
+  "url": "https://ok.wengage.com/YourDistrict"
 }
 EOF
 
@@ -60,7 +62,9 @@ wengage json
 - **Login:** Playwright (headless) for form-based login, captures session cookies
 - **Data:** Plain `fetch()` with cookie authentication — no browser rendering needed
 - **Session:** Cookies cached at `~/.config/wengage/cookies.json`, auto-refreshes on expiry
+- **Secrets:** `fnox exec` injects credentials from macOS Keychain (no biometric prompt)
 - **Parsing:** Regex extraction from server-rendered HTML (DevExpress/ASP.NET MVC)
+- **Dependencies:** Playwright + Node.js built-ins + `curl` + `fnox`
 
 ### Endpoints Used
 

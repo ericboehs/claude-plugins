@@ -10,20 +10,22 @@ Interactive setup for the `unanet` CLI timesheet automation tool.
 
 ## Prerequisites
 
-- **1Password CLI** (`op`) installed and configured with at least one account
-- **macOS Keychain** with 1Password master password stored (service: `op-master`)
+- **fnox** — secret management (`mise install fnox`)
+- **1Password CLI** (`op`) with biometric unlock — needed only for TOTP codes
 - **Playwright** installed (`npx playwright install chromium`)
 - A 1Password item containing Okta credentials (username, password, TOTP)
 
 ## Setup Steps
 
-1. Check prerequisites are installed (`op`, `playwright`)
-2. Verify 1Password master password is in Keychain: `security find-generic-password -s "op-master" -w`
-   - If not: prompt user to run `security add-generic-password -s "op-master" -a "their-email" -w`
-3. Sign in to 1Password and list items to find the Okta/Unanet entry
-4. Ask the user which 1Password item contains their Okta credentials
-5. Verify the item has username, password, and TOTP fields
-6. Create config at `~/.config/unanet/config.json`:
+1. Check prerequisites are installed (`fnox`, `op`, `playwright`)
+2. Store Okta credentials in fnox keychain:
+   ```bash
+   fnox set UNANET_USERNAME "okta_username" --provider keychain --global
+   fnox set UNANET_PASSWORD "okta_password" --provider keychain --global
+   ```
+3. Ask the user which 1Password item contains their Okta TOTP secret
+4. Verify the item has a TOTP field: `op item get ITEM_ID --otp`
+5. Create config at `~/.config/unanet/config.json`:
    ```json
    {
      "url": "https://COMPANY.unanet.biz/COMPANY",
@@ -32,8 +34,9 @@ Interactive setup for the `unanet` CLI timesheet automation tool.
      "default_project": "PROJECT_NAME"
    }
    ```
-7. Symlink the CLI: `ln -sf PLUGIN_PATH/bin/unanet ~/bin/unanet`
-8. Test with `unanet view`
+   Note: `op_item` is only used for TOTP code generation, not for username/password.
+6. Symlink the CLI: `ln -sf PLUGIN_PATH/bin/unanet ~/bin/unanet`
+7. Test with `unanet view`
 
 ## Behavior
 

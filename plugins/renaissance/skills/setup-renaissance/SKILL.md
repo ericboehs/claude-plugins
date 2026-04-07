@@ -11,17 +11,30 @@ Uses pure curl for authentication (no browser/Playwright needed). Supports multi
 
 ## Steps
 
-1. **Symlink the CLI:**
+1. **Install fnox** (if not already):
+```bash
+mise install fnox
+```
+
+2. **Symlink the CLI:**
 ```bash
 ln -sf /Users/ericboehs/Code/ericboehs/claude-plugins/plugins/renaissance/bin/renaissance /usr/local/bin/renaissance
 ```
 
-2. **Create config directory:**
+3. **Create config directory:**
 ```bash
 mkdir -p ~/.config/renaissance
 ```
 
-3. **Write config** at `~/.config/renaissance/config.json`:
+4. **Store credentials in fnox** (one per student):
+```bash
+fnox set RENAISSANCE_KID1_USERNAME "student_username" --provider keychain --global
+fnox set RENAISSANCE_KID1_PASSWORD "student_password" --provider keychain --global
+fnox set RENAISSANCE_KID2_USERNAME "student_username" --provider keychain --global
+fnox set RENAISSANCE_KID2_PASSWORD "student_password" --provider keychain --global
+```
+
+5. **Write config** at `~/.config/renaissance/config.json`:
 ```json
 {
   "school_id": "6e86d58e-91b4-4b66-8620-a24a71751415",
@@ -31,19 +44,19 @@ mkdir -p ~/.config/renaissance
   "students": [
     {
       "name": "Allie",
-      "op_item": "cxckp6sfjwhq4r3l5gxhjlbou4",
+      "credentials_key": "KID1",
       "user_id": "7fecd686-7cef-46d6-b557-fef2a819f01d"
     },
     {
       "name": "Layla",
-      "op_item": "",
+      "credentials_key": "KID2",
       "user_id": ""
     }
   ]
 }
 ```
 
-4. **Test it:**
+6. **Test it:**
 ```bash
 renaissance login allie
 renaissance goals allie
@@ -51,9 +64,13 @@ renaissance goals allie
 
 ## Adding a new student
 
-1. Create a 1Password item with their Renaissance username/password
-2. Get the item ID: `op item list | grep -i renaissance`
-3. Add them to the `students` array in config.json with `name` and `op_item`
+1. Choose a credentials key (e.g., `KID3`)
+2. Store credentials in fnox:
+   ```bash
+   fnox set RENAISSANCE_KID3_USERNAME "username" --provider keychain --global
+   fnox set RENAISSANCE_KID3_PASSWORD "password" --provider keychain --global
+   ```
+3. Add them to the `students` array in config.json with `name` and `credentials_key`
 4. Run `renaissance login <name>` — the first login will authenticate and cache the session
 5. To find their `user_id`: check `~/.config/renaissance/tokens-<name>.json` after login, or it comes from the gateway auth response (`identity.rgpRosterId`)
 
@@ -66,8 +83,17 @@ renaissance goals allie
 | `rpid` | School's Renaissance ID | Search at schools.renaissance.com, click school, check `/organizations/{id}` API response for `loginUrl` |
 | `client_id` | School's CRM ID | From gateway auth response `identity.crmId` |
 | `students[].name` | Display name for CLI filter | Your choice |
-| `students[].op_item` | 1Password item ID | `op item list \| grep -i <name>` |
+| `students[].credentials_key` | Key prefix for env vars (e.g., `KID1` → `RENAISSANCE_KID1_USERNAME`) | Your choice |
 | `students[].user_id` | Student's roster GUID | From gateway auth `identity.rgpRosterId` |
+
+## Credential Format
+
+Environment variables are keyed by `credentials_key` from config.json:
+
+| `credentials_key` | Username env var | Password env var |
+|-------------------|-----------------|-----------------|
+| `KID1` | `RENAISSANCE_KID1_USERNAME` | `RENAISSANCE_KID1_PASSWORD` |
+| `KID2` | `RENAISSANCE_KID2_USERNAME` | `RENAISSANCE_KID2_PASSWORD` |
 
 ## Per-student files
 

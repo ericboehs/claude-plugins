@@ -5,6 +5,15 @@ const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+// Re-exec under fnox if secrets aren't loaded
+if (!process.env.UNANET_USERNAME) {
+  try {
+    execFileSync('fnox', ['exec', '--', 'node', __filename, ...process.argv.slice(2)],
+      { stdio: 'inherit' });
+  } catch (e) { process.exit(e.status || 1); }
+  process.exit(0);
+}
+
 // --- Config ---
 
 const CONFIG_DIR = path.join(process.env.HOME, '.config', 'unanet');
@@ -20,49 +29,32 @@ function loadConfig() {
   return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
 }
 
-// --- Credentials via 1Password CLI ---
-
-function opSignIn() {
-  try {
-    const masterPass = execFileSync(
-      'security', ['find-generic-password', '-s', 'op-master', '-w'],
-      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-    ).trim();
-    const sessionToken = execFileSync(
-      'bash', ['-c', `printf '%s' "$1" | op signin --account my --raw`, '--', masterPass],
-      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-    ).trim();
-    return sessionToken;
-  } catch (e) {
-    console.error('Failed to sign in to 1Password. Is the master password stored in Keychain?');
-    console.error('Run: security add-generic-password -s "op-master" -a "your-email" -w');
-    process.exit(1);
-  }
-}
-
-function opGetField(sessionToken, itemId, field) {
-  const env = { ...process.env, OP_SESSION_my: sessionToken };
-  return execFileSync(
-    'op', ['item', 'get', itemId, '--fields', field, '--reveal'],
-    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env }
-  ).trim();
-}
-
-function opGetOTP(sessionToken, itemId) {
-  const env = { ...process.env, OP_SESSION_my: sessionToken };
-  return execFileSync(
-    'op', ['item', 'get', itemId, '--otp'],
-    { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], env }
-  ).trim();
-}
+// --- Credentials via env vars (fnox) + 1Password for OTP ---
 
 function getCredentials(config) {
-  const sessionToken = opSignIn();
-  const itemId = config.op_item;
+  const username = process.env.UNANET_USERNAME;
+  const password = process.env.UNANET_PASSWORD;
+  if (!username || !password) {
+    console.error('Missing UNANET_USERNAME or UNANET_PASSWORD env vars.');
+    console.error('Set them with: fnox set UNANET_USERNAME "value" --provider keychain --global');
+    process.exit(1);
+  }
+
+  const opItem = config.op_item;
   return {
-    username: opGetField(sessionToken, itemId, 'username'),
-    password: opGetField(sessionToken, itemId, 'password'),
-    getOTP: () => opGetOTP(sessionToken, itemId),
+    username,
+    password,
+    getOTP: () => {
+      try {
+        return execFileSync(
+          'op', ['item', 'get', opItem, '--otp'],
+          { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+        ).trim();
+      } catch (e) {
+        console.error('Failed to get OTP from 1Password. Ensure biometric unlock is enabled.');
+        process.exit(1);
+      }
+    },
   };
 }
 
@@ -162,6 +154,20 @@ async function loginToUnanet(page, config) {
     // Clear stale storage state so next attempt starts fresh
     if (fs.existsSync(STORAGE_STATE_FILE)) fs.unlinkSync(STORAGE_STATE_FILE);
     throw new Error(`Login failed. Still on Okta: ${page.url()}`);
+  }
+}
+
+// --- Timesheet Creation ---
+
+async function ensureTimesheetExists(page) {
+  const heading = page.locator('text=Time – Create Timesheet');
+  if (await heading.count() > 0) {
+    const saveBtn = page.locator('input[value="Save"], button:has-text("Save")');
+    if (await saveBtn.count() > 0) {
+      await saveBtn.nth(0).click();
+      await page.waitForLoadState('networkidle');
+      await page.waitForTimeout(2000);
+    }
   }
 }
 
@@ -470,6 +476,7 @@ async function main() {
     await loginToUnanet(page, config);
     // Save session for reuse by future invocations
     await context.storageState({ path: STORAGE_STATE_FILE });
+    await ensureTimesheetExists(page);
 
     switch (command) {
       case 'view': {
