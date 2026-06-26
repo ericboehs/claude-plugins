@@ -58,6 +58,25 @@ agent-desktop snapshot --root @e11 --snapshot <id> -i --compact
 
 If `CLAUDE_PLUGIN_ROOT` is unset, the script lives next to this SKILL at `../../scripts/enable-electron-a11y.sh`. It needs `swift` (Xcode or Command Line Tools) and inherits the terminal's Accessibility grant. The toggle persists for the running process; re-run it after the app restarts or if a snapshot drops back to ~3 refs.
 
+#### Typing into Electron text fields (contenteditable composers)
+
+Slack/Discord/Notion message boxes are contenteditable, and two quirks bite here (verified live on Slack):
+
+- **`set-value` and `clear` report `ACTION_FAILED` but actually work.** Their post-action verify chain can't re-read the contenteditable, so they cry failure even though the mutation landed. Don't trust the error: read the value back with `get` to confirm.
+- **`type` reports `ok` but APPENDS, and the ref goes `STALE_REF` immediately** (the DOM rebuilds on input). So `clear` first if you want a clean field, type once, then re-snapshot before any further ref op.
+
+Proven recipe for entering text:
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/scripts/enable-electron-a11y.sh" Slack
+ID=...   # from: agent-desktop snapshot --app Slack -i --compact
+REF=...  # the composer textfield (its value is seeded with a newline)
+agent-desktop clear "$REF" --snapshot "$ID"          # ignore ACTION_FAILED; verify with get
+agent-desktop type  "$REF" --snapshot "$ID" "hello"  # ok; ref is now stale
+agent-desktop get   "$REF" --snapshot "$ID" --property value   # may STALE_REF -> re-snapshot to read
+# to actually send: focus-window first, then `press enter` (omit to leave an unsent draft)
+```
+
 ## Common commands
 
 ```bash
@@ -82,6 +101,7 @@ agent-desktop focus-window --window-id w-4521          # resize/move/minimize/ma
 ## Gotchas (learned the hard way)
 
 - **Electron apps need a11y woken first.** Slack, VS Code, Discord, Notion, Obsidian, Teams ship their tree OFF and return a ~3-ref stub until `AXManualAccessibility=YES` is set on the app (Chromium enables a11y on demand). Run `"${CLAUDE_PLUGIN_ROOT}/scripts/enable-electron-a11y.sh" <app>` once per launch, then snapshot (see the Electron section above). agent-desktop does not do this itself yet (it's roadmap item P2-O15). Native AppKit apps (Finder, Xcode, Mail, System Settings, TextEdit, Safari) work with no prep.
+- **Electron text writes report failure but succeed.** On contenteditable composers, `set-value`/`clear` return `ACTION_FAILED` even though the mutation landed (the verify chain can't re-read). `type` returns `ok` but appends and immediately invalidates the ref (`STALE_REF`). Confirm with `get`, re-snapshot after typing. Full recipe in the Electron section.
 - **README examples are shorthand; flags are real.** `focus-window w-4521` is actually `focus-window --window-id w-4521`. Same for `--snapshot`, `--window-id`, `--root`.
 - **Keystrokes are global, not app-scoped.** `press`/`key-down` go to whatever is frontmost, not necessarily the `--app` you snapshotted. If the target app or its window isn't focused (e.g. behind a modal), `focus-window` first or input lands elsewhere.
 - **Roles vary by app.** TextEdit's editable body is a `textfield` with `SetValue`, not `textarea`. Snapshot and read the actual roles instead of assuming.
