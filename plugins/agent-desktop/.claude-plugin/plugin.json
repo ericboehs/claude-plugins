@@ -1,7 +1,7 @@
 {
   "name": "agent-desktop",
   "version": "1.0.0",
-  "description": "Drive macOS apps via the accessibility tree using the agent-desktop CLI — observe with snapshots, act on element refs",
+  "description": "Drive macOS apps via the accessibility tree using the agent-desktop CLI: observe with snapshots, act on element refs",
   "author": {
     "name": "Eric Boehs",
     "url": "https://github.com/ericboehs"
