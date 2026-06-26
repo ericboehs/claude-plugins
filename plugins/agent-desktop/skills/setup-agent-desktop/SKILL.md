@@ -6,7 +6,7 @@ tools: Bash
 
 # Setup agent-desktop CLI
 
-Install the `agent-desktop` CLI (lahfir/agent-desktop) and grant permissions. Eric's environment has two supply-chain gates that block the normal install — this skill works through both.
+Install the `agent-desktop` CLI (lahfir/agent-desktop) and grant permissions. Eric's environment has two supply-chain gates that block the normal install; this skill works through both.
 
 ## Step 1: Check if already installed
 
@@ -14,9 +14,9 @@ Install the `agent-desktop` CLI (lahfir/agent-desktop) and grant permissions. Er
 which agent-desktop && agent-desktop version && agent-desktop status
 ```
 
-- If `version` prints JSON and `status` shows `accessibility: granted`, it's set up — suggest `/agent-desktop`.
-- If "Native binary not found": the wrapper installed but the build step was skipped — go to Step 3 (approve build).
-- If "command not found": install from scratch — Step 2.
+- If `version` prints JSON and `status` shows `accessibility: granted`, it's set up; suggest `/agent-desktop`.
+- If "Native binary not found": the wrapper installed but the build step was skipped; go to Step 3 (approve build).
+- If "command not found": install from scratch, Step 2.
 
 ## Step 2: Verify a trusted binary, then install via aube
 
@@ -72,7 +72,7 @@ agent-desktop launch Finder
 agent-desktop snapshot --app Finder -i --compact   # should return refs, not an error
 ```
 
-If this returns a tree with refs, it's working — suggest `/agent-desktop`. Clean up: `rm -rf /tmp/ad-trusted`.
+If this returns a tree with refs, it's working; suggest `/agent-desktop`. Clean up: `rm -rf /tmp/ad-trusted`.
 
 ## Upgrading
 
