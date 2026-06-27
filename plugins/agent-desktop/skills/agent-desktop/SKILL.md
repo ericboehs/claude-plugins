@@ -60,22 +60,29 @@ If `CLAUDE_PLUGIN_ROOT` is unset, the script lives next to this SKILL at `../../
 
 #### Typing into Electron text fields (contenteditable composers)
 
-Slack/Discord/Notion message boxes are contenteditable, and two quirks bite here (verified live on Slack):
+Slack/Discord/Notion message boxes are contenteditable. Several quirks bite here (verified live on Slack, including sending a real DM):
 
+- **Use `set-value`, NOT `type`.** On Electron contenteditable, `type` double-inserts (one call writes the text twice, e.g. `"hello hello"`) and invalidates the ref (`STALE_REF`). `set-value` writes a single clean copy. (This is the opposite of native AppKit, where `type` is fine.)
 - **`set-value` and `clear` report `ACTION_FAILED` but actually work.** Their post-action verify chain can't re-read the contenteditable, so they cry failure even though the mutation landed. Don't trust the error: read the value back with `get` to confirm.
-- **`type` reports `ok` but APPENDS, and the ref goes `STALE_REF` immediately** (the DOM rebuilds on input). So `clear` first if you want a clean field, type once, then re-snapshot before any further ref op.
+- **`set-value` strips emoji and other multibyte chars.** A leading `✅` came through as a space (and a stray leading newline appeared). Stick to ASCII, or paste via clipboard, for anything with emoji.
+- **`clear` may leave a seed newline.** The composer's empty state reads as `"\n"`, not `""`. To force-empty a focused field, `press cmd+a` then `press delete`.
 
-Proven recipe for entering text:
+Proven recipe for entering and sending text:
 
 ```bash
 "${CLAUDE_PLUGIN_ROOT}/scripts/enable-electron-a11y.sh" Slack
 ID=...   # from: agent-desktop snapshot --app Slack -i --compact
 REF=...  # the composer textfield (its value is seeded with a newline)
-agent-desktop clear "$REF" --snapshot "$ID"          # ignore ACTION_FAILED; verify with get
-agent-desktop type  "$REF" --snapshot "$ID" "hello"  # ok; ref is now stale
-agent-desktop get   "$REF" --snapshot "$ID" --property value   # may STALE_REF -> re-snapshot to read
-# to actually send: focus-window first, then `press enter` (omit to leave an unsent draft)
+agent-desktop set-value "$REF" --snapshot "$ID" "hello"   # ignore ACTION_FAILED
+# verify it landed cleanly (re-snapshot, the ref may have changed):
+agent-desktop snapshot --app Slack -i --compact            # get fresh REF/ID
+agent-desktop get "$REF2" --snapshot "$ID2" --property value
+# to actually send: focus the window, then press enter (omit to leave an unsent draft)
+agent-desktop focus-window --window-id w-XXXX
+agent-desktop press return
 ```
+
+To navigate to a specific DM/channel first, drive the Cmd+K quick switcher: `press cmd+k`, `set-value` the search `combobox` with the name, `press return`, then **confirm via the window title** (e.g. `list-windows` shows `Eric (DM) - Boehs - Slack`) before composing. The switcher's result rows are `menuitem`s with empty AX names, so gate on the title, not the row text.
 
 ## Common commands
 
@@ -101,7 +108,7 @@ agent-desktop focus-window --window-id w-4521          # resize/move/minimize/ma
 ## Gotchas (learned the hard way)
 
 - **Electron apps need a11y woken first.** Slack, VS Code, Discord, Notion, Obsidian, Teams ship their tree OFF and return a ~3-ref stub until `AXManualAccessibility=YES` is set on the app (Chromium enables a11y on demand). Run `"${CLAUDE_PLUGIN_ROOT}/scripts/enable-electron-a11y.sh" <app>` once per launch, then snapshot (see the Electron section above). agent-desktop does not do this itself yet (it's roadmap item P2-O15). Native AppKit apps (Finder, Xcode, Mail, System Settings, TextEdit, Safari) work with no prep.
-- **Electron text writes report failure but succeed.** On contenteditable composers, `set-value`/`clear` return `ACTION_FAILED` even though the mutation landed (the verify chain can't re-read). `type` returns `ok` but appends and immediately invalidates the ref (`STALE_REF`). Confirm with `get`, re-snapshot after typing. Full recipe in the Electron section.
+- **Electron text writes: use `set-value`, and it lies about failing.** On contenteditable composers `type` double-inserts and invalidates the ref, so use `set-value` (single clean copy). But `set-value`/`clear` return `ACTION_FAILED` even though the write landed, and `set-value` strips emoji. Confirm with `get`, stick to ASCII, re-snapshot after. Full recipe in the Electron section.
 - **README examples are shorthand; flags are real.** `focus-window w-4521` is actually `focus-window --window-id w-4521`. Same for `--snapshot`, `--window-id`, `--root`.
 - **Keystrokes are global, not app-scoped.** `press`/`key-down` go to whatever is frontmost, not necessarily the `--app` you snapshotted. If the target app or its window isn't focused (e.g. behind a modal), `focus-window` first or input lands elsewhere.
 - **Roles vary by app.** TextEdit's editable body is a `textfield` with `SetValue`, not `textarea`. Snapshot and read the actual roles instead of assuming.
