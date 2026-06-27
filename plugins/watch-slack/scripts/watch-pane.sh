@@ -44,7 +44,13 @@ tail -n0 -F "$LOG" | while IFS= read -r line; do
   # stable across moves, but session:window.pane changes when windows move.
   me=$(tmux display-message -t "$TMUX_PANE" -p '#S:#{window_index}.#{pane_index}' 2>/dev/null)
   case "$line" in
-    *" $me ⤷ "*) printf '%s\n' "$line" ;;
+    *" $me ⤷ "*)
+      printf '%s\n' "$line"
+      # Engaging with this pane's thread (a reply or reaction) means you've
+      # already seen it — clear the pane's @special_activity (⊙) indicator,
+      # the same way focusing the pane does (see .tmux.conf pane-focus-in hook).
+      tmux set-window-option -t "$TMUX_PANE" -u @special_activity 2>/dev/null || true
+      ;;
     *retrying*|*"server asked to disconnect"*) printf '%s\n' "$line" ;;
   esac
 done

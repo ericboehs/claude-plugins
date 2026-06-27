@@ -19,6 +19,10 @@ surfaces only the replies addressed to the current tmux pane.
    emits only the lines tagged for the current pane.
 3. **Re-resolves the pane id on every line** from the stable `$TMUX_PANE`, so
    moving tmux windows around routes new messages correctly with no restart.
+4. **Clears the pane's tmux attention indicator** when a reply/reaction for it
+   arrives — engaging with a pane's thread unsets that window's
+   `@special_activity` (the `⊙` marker), just like focusing the pane would, so
+   you don't have to switch to it to dismiss the badge.
 
 ### Why one shared listener (not one per pane)
 
