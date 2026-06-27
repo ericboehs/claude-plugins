@@ -196,11 +196,11 @@ def print_event(event)
   puts "#{prefix}#{text.gsub("\n", "\n#{" " * prefix.length}")}"
 end
 
-# Render one reaction_added event. A reaction surfaces only when its REACTING
-# user passes the same allowlist as messages (so when filtered to yourself, you
-# never see others' reactions) and the reacted-to message resolves to a pane's
-# :claude: thread root — so it routes to that pane just like a reply.
-def print_reaction(event)
+# Render a reaction_added / reaction_removed event. A reaction surfaces only when
+# its REACTING user passes the same allowlist as messages (so when filtered to
+# yourself, you never see others' reactions) and the reacted-to message resolves
+# to a pane's :claude: thread root — so it routes to that pane just like a reply.
+def print_reaction(event, verb)
   return if FILTER_USERS.any? && !FILTER_USERS.include?(event["user"])
 
   item = event["item"] || {}
@@ -215,7 +215,7 @@ def print_reaction(event)
   who   = user_name(event["user"])
   when_ = ts_to_time(event["event_ts"] || item["ts"])
   prefix = target ? "[#{when_}] #{target} ⤷ " : "[#{when_}] "
-  puts "#{prefix}#{who} reacted with :#{event["reaction"]}:"
+  puts "#{prefix}#{who} #{verb} :#{event["reaction"]}:"
 end
 
 # Decode + dispatch one Slack frame (a parsed Hash). Acks envelopes first so
@@ -238,8 +238,9 @@ def handle_message(data, connection)
   when "events_api"
     event = data.dig("payload", "event")
     case event && event["type"]
-    when "message"        then print_event(event)
-    when "reaction_added" then print_reaction(event)
+    when "message"          then print_event(event)
+    when "reaction_added"   then print_reaction(event, "reacted with")
+    when "reaction_removed" then print_reaction(event, "removed reaction")
     end
   end
 end
