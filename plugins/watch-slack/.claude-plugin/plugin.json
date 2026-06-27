@@ -1,0 +1,9 @@
+{
+  "name": "watch-slack",
+  "version": "1.0.0",
+  "description": "Watch a Slack #notifications channel for replies addressed to the current Claude pane, via a shared Socket Mode listener and a move-aware per-pane consumer",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}
