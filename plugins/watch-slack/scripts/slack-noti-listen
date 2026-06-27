@@ -9,8 +9,9 @@ Warning[:experimental] = false
 #
 # Auth: set BOEHS_SLACK_NOTI_SOCKET_XAPP to the app-level token (xapp-...) with
 #       the connections:write scope. The Slack app must have Socket Mode on,
-#       a message.channels event subscription, and its bot invited to the
-#       channel ( /invite @yourapp in #notifications ).
+#       message.channels (and reaction_added, to stream reactions) event
+#       subscriptions, and its bot invited to the channel
+#       ( /invite @yourapp in #notifications ).
 #
 # Usage:
 #   slack-noti-listen                 # pretty, human-readable stream
@@ -26,6 +27,8 @@ Warning[:experimental] = false
 #   BOEHS_SLACK_NOTI_TARGET    # tmux pane (e.g. code:1.0) or "auto" — only surface
 #                              # replies into that pane's :claude: notification thread
 #                              # (requires BOEHS_SLACK_NOTI_BOT_XOXB to resolve roots).
+#   BOEHS_SLACK_NOTI_IDLE_TIMEOUT # seconds with no socket frame before we treat
+#                              # the connection as dead and reconnect (default 30).
 #   BOEHS_SLACK_NOTI_BOT_XOXB  # bot token (xoxb-, groups:history scope). If set,
 #                              # replies in a thread whose ROOT starts with
 #                              #   :claude: [host:]session:window.pane
@@ -52,6 +55,12 @@ BOT_TOKEN   = ENV["BOEHS_SLACK_NOTI_BOT_XOXB"]
 FILTER_CHAN = ENV["BOEHS_SLACK_NOTI_CHANNEL"]
 JSON_OUT    = ARGV.include?("--json")
 DEBUG       = ARGV.include?("--debug") || ENV["BOEHS_SLACK_NOTI_DEBUG"]
+
+# Frame-level liveness. Slack pings the socket ~every 10s; the high-level #read
+# swallows those pings, so a silently-dead TCP socket (no close frame) would hang
+# #read forever. We read at the frame level instead and treat ANY frame (ping,
+# pong, or data) as a heartbeat: no frame within IDLE_TIMEOUT => dead => reconnect.
+IDLE_TIMEOUT = Integer(ENV["BOEHS_SLACK_NOTI_IDLE_TIMEOUT"] || 30)
 
 # User allowlist from --user U1,U2 (or repeated) and/or BOEHS_SLACK_NOTI_USER.
 cli_users = []
@@ -187,32 +196,107 @@ def print_event(event)
   puts "#{prefix}#{text.gsub("\n", "\n#{" " * prefix.length}")}"
 end
 
-# Run one socket session; returns when Slack closes/refreshes the connection.
+# Render one reaction_added event. A reaction surfaces only when its REACTING
+# user passes the same allowlist as messages (so when filtered to yourself, you
+# never see others' reactions) and the reacted-to message resolves to a pane's
+# :claude: thread root — so it routes to that pane just like a reply.
+def print_reaction(event)
+  return if FILTER_USERS.any? && !FILTER_USERS.include?(event["user"])
+
+  item = event["item"] || {}
+  return unless item["type"] == "message"
+  return if FILTER_CHAN && item["channel"] != FILTER_CHAN
+
+  # The pane is the :claude: directive on the reacted message's thread root.
+  # Reacting to the notification root (the common case) resolves directly.
+  target = thread_target(item["channel"], item["ts"])
+  return if FILTER_TARGET && target != FILTER_TARGET
+
+  who   = user_name(event["user"])
+  when_ = ts_to_time(event["event_ts"] || item["ts"])
+  prefix = target ? "[#{when_}] #{target} ⤷ " : "[#{when_}] "
+  puts "#{prefix}#{who} reacted with :#{event["reaction"]}:"
+end
+
+# Decode + dispatch one Slack frame (a parsed Hash). Acks envelopes first so
+# Slack doesn't drop us, then routes message / reaction events. Throws
+# :disconnect to make run_session tear down and reconnect.
+def handle_message(data, connection)
+  log "frame: #{data.inspect}" if DEBUG
+
+  if (envelope_id = data["envelope_id"])
+    connection.write(Protocol::WebSocket::TextMessage.generate("envelope_id" => envelope_id))
+    connection.flush
+  end
+
+  case data["type"]
+  when "hello"
+    log "connected (#{data.dig("connection_info", "app_id") || "ok"})"
+  when "disconnect"
+    log "server asked to disconnect (#{data["reason"]}); reconnecting"
+    throw :disconnect
+  when "events_api"
+    event = data.dig("payload", "event")
+    case event && event["type"]
+    when "message"        then print_event(event)
+    when "reaction_added" then print_reaction(event)
+    end
+  end
+end
+
+# Monotonic seconds — immune to wall-clock jumps, for measuring idle gaps.
+def mono = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+# Run one socket session; returns when Slack closes/refreshes the connection or
+# the socket goes silent. We use the high-level #read (it transparently handles
+# permessage-deflate + frame reassembly), but #read only *returns* on data
+# messages — it silently auto-pongs the server's ~10s pings internally. A TCP
+# socket that dies without a close frame would therefore hang #read forever
+# (the original silent-death bug). So we hook the connection's control-frame
+# handlers to stamp a liveness clock on every server ping/pong, and a watchdog
+# reconnects if that clock goes stale (no frame at all for IDLE_TIMEOUT).
 def run_session(ws_url)
   endpoint = Async::HTTP::Endpoint.parse(ws_url)
 
   Async::WebSocket::Client.connect(endpoint) do |connection|
-    while (message = connection.read)
-      # NB: message.parse symbolizes keys; we use string keys throughout.
-      data = JSON.parse(message.to_str)
+    task = Async::Task.current
+    last = [mono]   # mutable holder so the hook + watchdog share one clock
 
-      log "frame: #{message.to_str}" if DEBUG
+    # Stamp liveness whenever the server pings/pongs us (~every 10s on a healthy
+    # socket). define_method requires explicit super(frame) — bare super raises.
+    heartbeat = Module.new do
+      define_method(:receive_ping) { |frame| super(frame); last[0] = mono }
+      define_method(:receive_pong) { |frame| super(frame); last[0] = mono }
+    end
+    connection.singleton_class.prepend(heartbeat)
 
-      # Ack any enveloped frame immediately (before doing work) or Slack drops us.
-      if (envelope_id = data["envelope_id"])
-        connection.write(Protocol::WebSocket::TextMessage.generate("envelope_id" => envelope_id))
-        connection.flush
+    reader = task.async do
+      catch(:disconnect) do
+        while (message = connection.read)
+          last[0] = mono
+          handle_message(JSON.parse(message.to_str), connection)
+        end
       end
+    end
 
-      case data["type"]
-      when "hello"
-        log "connected (#{data.dig("connection_info", "app_id") || "ok"})"
-      when "disconnect"
-        log "server asked to disconnect (#{data["reason"]}); reconnecting"
-        return
-      when "events_api"
-        print_event(data.dig("payload", "event"))
+    check = [IDLE_TIMEOUT / 3.0, 5.0].min
+    watchdog = task.async do
+      loop do
+        sleep check
+        connection.flush rescue nil   # push any buffered pong replies to Slack
+        next unless mono - last[0] > IDLE_TIMEOUT
+        log "no socket activity for #{IDLE_TIMEOUT}s — assuming dead socket; reconnecting"
+        reader.stop
+        break
       end
+    end
+
+    begin
+      reader.wait               # returns on server disconnect or watchdog stop
+    rescue Async::Stop
+      # reader was stopped by the watchdog; fall through to reconnect
+    ensure
+      watchdog.stop
     end
   end
 end

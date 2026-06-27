@@ -34,7 +34,8 @@ starve panes. So: one supervised socket in launchd, many cheap local consumers.
   `slack-noti-listen`. The service puts `~/.local/share/mise/shims` first on
   `PATH` so `#!/usr/bin/env ruby` resolves there, not to system Ruby.
 - **A Slack app with Socket Mode** enabled, subscribed to `message.channels`
-  (and/or `message.groups`), with its bot invited to the channel.
+  (and/or `message.groups`), with its bot invited to the channel. To also stream
+  **reactions**, subscribe to the `reaction_added` bot event.
 - **Tokens**, supplied to the listener's environment:
   - `BOEHS_SLACK_NOTI_SOCKET_XAPP` — app-level token (`xapp-…`, `connections:write`).
   - `BOEHS_SLACK_NOTI_BOT_XOXB` — bot token (`xoxb-…`, `groups:history` /
@@ -74,6 +75,29 @@ Override the launchd label or log path with `WATCH_SLACK_LABEL` / `WATCH_SLACK_L
   truth). Streams messages + thread replies; tags replies into `:claude:` panes.
 - `scripts/watch-slack-service.sh` — install/manage the shared launchd service.
 - `scripts/watch-pane.sh` — move-aware per-pane consumer of the shared log.
+
+## Reactions
+
+If the Slack app subscribes to `reaction_added`, an emoji reaction on a pane's
+notification message is surfaced to that pane just like a reply:
+
+```
+[2026-06-27 17:48] code:2.0 ⤷ Eric reacted with :thumbsup:
+```
+
+Reactions obey the same user allowlist as messages — with `BOEHS_SLACK_NOTI_USER`
+set to yourself, you only see your own reactions, never other people's. (Setting
+the user filter to your own ID is the recommended config: it keeps the stream to
+the messages and reactions that are actually you talking to the agent.)
+
+## Resilience
+
+The listener holds the socket open with the high-level read (which transparently
+handles permessage-deflate and frame reassembly) and hooks the connection's
+control-frame handlers to stamp a liveness clock on every server ping (~10s). A
+watchdog reconnects if the socket goes silent for `BOEHS_SLACK_NOTI_IDLE_TIMEOUT`
+seconds (default 30) — closing the silent-TCP-death gap where a dead socket left
+`read` blocked forever with no reconnect.
 
 ## Known limitation
 
