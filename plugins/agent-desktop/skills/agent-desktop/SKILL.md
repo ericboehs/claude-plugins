@@ -66,6 +66,7 @@ Slack/Discord/Notion message boxes are contenteditable. Several quirks bite here
 - **`set-value` and `clear` report `ACTION_FAILED` but actually work.** Their post-action verify chain can't re-read the contenteditable, so they cry failure even though the mutation landed. Don't trust the error: read the value back with `get` to confirm.
 - **`set-value` strips emoji and other multibyte chars.** A leading `✅` came through as a space (and a stray leading newline appeared). Stick to ASCII, or paste via clipboard, for anything with emoji.
 - **`clear` may leave a seed newline.** The composer's empty state reads as `"\n"`, not `""`. To force-empty a focused field, `press cmd+a` then `press delete`.
+- **The composer renders lazily; "no textfield" is not failure.** Right after navigating to a DM/channel the tree can show 60+ refs but NO editable field at all (Slack hasn't materialized the input yet). Re-snapshot, or nudge the view (focus the window, scroll, or click the composer region), then look again. The composer is the `textfield` whose value is seeded with `"\n"`.
 
 Proven recipe for entering and sending text:
 
@@ -114,6 +115,7 @@ agent-desktop focus-window --window-id w-4521          # resize/move/minimize/ma
 - **Roles vary by app.** TextEdit's editable body is a `textfield` with `SetValue`, not `textarea`. Snapshot and read the actual roles instead of assuming.
 - **Re-snapshot after any UI change.** Stale refs fail closed with `STALE_REF`; ambiguous matches return `AMBIGUOUS_TARGET` (it won't guess). Re-drill the affected region or take a fresh snapshot.
 - **`--headed` for physical gestures only.** `hover`, `drag`, `mouse-*`, `triple-click` need the global `--headed` flag (permits cursor movement / focus stealing). Everything else stays headless.
+- **`mouse-click` takes `--xy x,y`, and negative coords need the `=` form.** It is `--xy -956,300`, not two positional args. With a leading minus (windows on a left-hand display have negative X), the space form fails (`unexpected argument '-9'`); use `--xy=-956,300`. Prefer ref-based `click` over coordinates whenever a ref exists.
 
 ## Output contract
 
