@@ -1,0 +1,321 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Silence Ruby's "IO::Buffer is experimental" warning emitted by resolv/async I/O.
+Warning[:experimental] = false
+
+# slack-noti-listen — stream messages (incl. thread replies) from #notifications
+# on boehs.slack.com via Slack Socket Mode.
+#
+# Auth: set BOEHS_SLACK_NOTI_SOCKET_XAPP to the app-level token (xapp-...) with
+#       the connections:write scope. The Slack app must have Socket Mode on,
+#       message.channels (and reaction_added, to stream reactions) event
+#       subscriptions, and its bot invited to the channel
+#       ( /invite @yourapp in #notifications ).
+#
+# Usage:
+#   slack-noti-listen                 # pretty, human-readable stream
+#   slack-noti-listen --json          # one raw event JSON per line (for logging)
+#   slack-noti-listen --user U02..    # only show messages from these user IDs
+#   slack-noti-listen --target code:1.0  # only replies into this pane's thread
+#   slack-noti-listen --target auto      # derive the pane from $TMUX_PANE
+#
+# Optional env:
+#   BOEHS_SLACK_NOTI_CHANNEL   # channel ID (C0123...) to filter to. Unset = all.
+#   BOEHS_SLACK_NOTI_USER      # comma-separated user IDs to allow (same as --user).
+#                              # Unset = everyone.
+#   BOEHS_SLACK_NOTI_TARGET    # tmux pane (e.g. code:1.0) or "auto" — only surface
+#                              # replies into that pane's :claude: notification thread
+#                              # (requires BOEHS_SLACK_NOTI_BOT_XOXB to resolve roots).
+#   BOEHS_SLACK_NOTI_IDLE_TIMEOUT # seconds with no socket frame before we treat
+#                              # the connection as dead and reconnect (default 30).
+#   BOEHS_SLACK_NOTI_BOT_XOXB  # bot token (xoxb-, groups:history scope). If set,
+#                              # replies in a thread whose ROOT starts with
+#                              #   :claude: [host:]session:window.pane
+#                              # are tagged with that target, e.g.
+#                              #   [time] gfe:code:5.0 ← Eric: <text>
+#                              # Without it, thread replies just show the ⤷ marker.
+#
+# Names: user/channel IDs are resolved to names via the slk cache files
+#   (~/.cache/slk/users-boehs.json, channels-boehs.json). No bot token needed.
+#   Unknown IDs fall back to the raw ID. Run `slk cache populate boehs` to refresh.
+#
+# Notes:
+#   - Slack periodically refreshes the socket; this reconnects automatically.
+
+require "net/http"
+require "uri"
+require "json"
+require "async"
+require "async/http/endpoint"
+require "async/websocket/client"
+
+APP_TOKEN   = ENV["BOEHS_SLACK_NOTI_SOCKET_XAPP"]
+BOT_TOKEN   = ENV["BOEHS_SLACK_NOTI_BOT_XOXB"]
+FILTER_CHAN = ENV["BOEHS_SLACK_NOTI_CHANNEL"]
+JSON_OUT    = ARGV.include?("--json")
+DEBUG       = ARGV.include?("--debug") || ENV["BOEHS_SLACK_NOTI_DEBUG"]
+
+# Frame-level liveness. Slack pings the socket ~every 10s; the high-level #read
+# swallows those pings, so a silently-dead TCP socket (no close frame) would hang
+# #read forever. We read at the frame level instead and treat ANY frame (ping,
+# pong, or data) as a heartbeat: no frame within IDLE_TIMEOUT => dead => reconnect.
+IDLE_TIMEOUT = Integer(ENV["BOEHS_SLACK_NOTI_IDLE_TIMEOUT"] || 30)
+
+# User allowlist from --user U1,U2 (or repeated) and/or BOEHS_SLACK_NOTI_USER.
+cli_users = []
+ARGV.each_with_index { |a, i| cli_users.concat(ARGV[i + 1].to_s.split(",")) if a == "--user" }
+FILTER_USERS = (cli_users + ENV["BOEHS_SLACK_NOTI_USER"].to_s.split(","))
+               .map(&:strip).reject(&:empty?).uniq
+
+# Resolve THIS process's tmux pane as `session:window.pane`, or nil if not in tmux.
+# Pinned to $TMUX_PANE so it reports *our* pane, not whichever pane is focused
+# (a bare `tmux display-message` follows the client's active pane).
+def tmux_target
+  pane = ENV["TMUX_PANE"].to_s
+  return nil if pane.empty?
+
+  fmt = '#S:#{window_index}.#{pane_index}' # single-quoted: not Ruby interpolation
+  out = `tmux display-message -t '#{pane}' -p '#{fmt}' 2>/dev/null`.strip
+  out.empty? ? nil : out
+end
+
+# Pane allowlist from --target code:1.0 / --target auto and/or BOEHS_SLACK_NOTI_TARGET.
+# When set, only thread replies whose ROOT is that pane's :claude: notification show.
+cli_target = nil
+ARGV.each_with_index { |a, i| cli_target = ARGV[i + 1] if a == "--target" }
+raw_target = (cli_target || ENV["BOEHS_SLACK_NOTI_TARGET"]).to_s.strip
+FILTER_TARGET = raw_target.empty? ? nil : (raw_target == "auto" ? tmux_target : raw_target)
+
+abort "error: BOEHS_SLACK_NOTI_SOCKET_XAPP is not set" if APP_TOKEN.nil? || APP_TOKEN.empty?
+
+$stdout.sync = true
+
+# ID -> name maps from the slk cache (users + reverse-mapped channels).
+def load_name_map(file, invert: false)
+  data = JSON.parse(File.read(File.expand_path(file)))
+  invert ? data.invert : data
+rescue StandardError
+  {}
+end
+
+USER_NAMES = load_name_map("~/.cache/slk/users-boehs.json")
+CHAN_NAMES = load_name_map("~/.cache/slk/channels-boehs.json", invert: true)
+
+def user_name(id)  = USER_NAMES[id] || id
+def chan_name(id)  = CHAN_NAMES[id] ? "##{CHAN_NAMES[id]}" : id
+
+# A thread root of `:claude: [host:]session:window.pane` designates a tmux target.
+# Capture the target token (e.g. "code:5.0" or "gfe:code:5.0").
+CLAUDE_DIRECTIVE = /:claude:\s+((?:[\w.-]+:){1,2}\d+\.\d+)/
+THREAD_TARGETS   = {} # thread_ts => target string or nil (nil = looked up, none)
+
+def slack_get(method, **params)
+  uri = URI("https://slack.com/api/#{method}")
+  uri.query = URI.encode_www_form(params)
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.use_ssl = true
+  req = Net::HTTP::Get.new(uri)
+  req["Authorization"] = "Bearer #{BOT_TOKEN}"
+  JSON.parse(http.request(req).body)
+end
+
+# Resolve a reply's thread root to its :claude: tmux target, or nil. Cached.
+def thread_target(channel, thread_ts)
+  return THREAD_TARGETS[thread_ts] if THREAD_TARGETS.key?(thread_ts)
+  return THREAD_TARGETS[thread_ts] = nil if BOT_TOKEN.nil? || BOT_TOKEN.empty?
+
+  target = nil
+  begin
+    body = slack_get("conversations.replies",
+                     channel: channel, ts: thread_ts, limit: 1, inclusive: true)
+    if body["ok"]
+      target = body.dig("messages", 0, "text").to_s[CLAUDE_DIRECTIVE, 1]
+    elsif DEBUG
+      log "conversations.replies error: #{body["error"]}"
+    end
+  rescue StandardError => e
+    log "thread lookup failed: #{e.class}: #{e.message}" if DEBUG
+  end
+  THREAD_TARGETS[thread_ts] = target
+end
+
+def log(msg)
+  warn "[slack-noti-listen] #{msg}"
+end
+
+# Exchange the app token for a fresh Socket Mode WebSocket URL.
+def open_connection_url
+  uri = URI("https://slack.com/api/apps.connections.open")
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.use_ssl = true
+  req = Net::HTTP::Post.new(uri)
+  req["Authorization"] = "Bearer #{APP_TOKEN}"
+  req["Content-Type"]  = "application/x-www-form-urlencoded"
+  body = JSON.parse(http.request(req).body)
+  raise "apps.connections.open failed: #{body["error"] || body.inspect}" unless body["ok"]
+
+  body["url"]
+end
+
+def ts_to_time(ts)
+  Time.at(ts.to_f).strftime("%Y-%m-%d %H:%M")
+rescue StandardError
+  ts.to_s
+end
+
+# Render one Slack event to stdout. Returns nothing.
+def print_event(event)
+  return unless event.is_a?(Hash) && event["type"] == "message"
+
+  return if FILTER_CHAN && event["channel"] != FILTER_CHAN
+  return if FILTER_USERS.any? && !FILTER_USERS.include?(event["user"])
+
+  if JSON_OUT
+    puts JSON.generate(event)
+    return
+  end
+
+  who   = event["user"] ? user_name(event["user"])
+                        : (event.dig("bot_profile", "name") || event["bot_id"] || "?")
+  text  = event["text"].to_s.empty? ? "(#{event["subtype"] || "no text"})" : event["text"]
+  when_ = ts_to_time(event["ts"])
+
+  is_reply = event["thread_ts"] && event["thread_ts"] != event["ts"]
+  target   = is_reply ? thread_target(event["channel"], event["thread_ts"]) : nil
+
+  # Pane filter: only surface replies destined for our pane's notification thread.
+  return if FILTER_TARGET && !(is_reply && target == FILTER_TARGET)
+
+  prefix =
+    if target
+      "[#{when_}] #{target} ⤷ #{who}: "
+    else
+      "[#{when_}]#{is_reply ? " ⤷" : ""} #{who}: "
+    end
+  puts "#{prefix}#{text.gsub("\n", "\n#{" " * prefix.length}")}"
+end
+
+# Render a reaction_added / reaction_removed event. A reaction surfaces only when
+# its REACTING user passes the same allowlist as messages (so when filtered to
+# yourself, you never see others' reactions) and the reacted-to message resolves
+# to a pane's :claude: thread root — so it routes to that pane just like a reply.
+def print_reaction(event, verb)
+  return if FILTER_USERS.any? && !FILTER_USERS.include?(event["user"])
+
+  item = event["item"] || {}
+  return unless item["type"] == "message"
+  return if FILTER_CHAN && item["channel"] != FILTER_CHAN
+
+  # The pane is the :claude: directive on the reacted message's thread root.
+  # Reacting to the notification root (the common case) resolves directly.
+  target = thread_target(item["channel"], item["ts"])
+  return if FILTER_TARGET && target != FILTER_TARGET
+
+  who   = user_name(event["user"])
+  when_ = ts_to_time(event["event_ts"] || item["ts"])
+  prefix = target ? "[#{when_}] #{target} ⤷ " : "[#{when_}] "
+  puts "#{prefix}#{who} #{verb} :#{event["reaction"]}:"
+end
+
+# Decode + dispatch one Slack frame (a parsed Hash). Acks envelopes first so
+# Slack doesn't drop us, then routes message / reaction events. Throws
+# :disconnect to make run_session tear down and reconnect.
+def handle_message(data, connection)
+  log "frame: #{data.inspect}" if DEBUG
+
+  if (envelope_id = data["envelope_id"])
+    connection.write(Protocol::WebSocket::TextMessage.generate("envelope_id" => envelope_id))
+    connection.flush
+  end
+
+  case data["type"]
+  when "hello"
+    log "connected (#{data.dig("connection_info", "app_id") || "ok"})"
+  when "disconnect"
+    log "server asked to disconnect (#{data["reason"]}); reconnecting"
+    throw :disconnect
+  when "events_api"
+    event = data.dig("payload", "event")
+    case event && event["type"]
+    when "message"          then print_event(event)
+    when "reaction_added"   then print_reaction(event, "reacted with")
+    when "reaction_removed" then print_reaction(event, "removed reaction")
+    end
+  end
+end
+
+# Monotonic seconds — immune to wall-clock jumps, for measuring idle gaps.
+def mono = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+# Run one socket session; returns when Slack closes/refreshes the connection or
+# the socket goes silent. We use the high-level #read (it transparently handles
+# permessage-deflate + frame reassembly), but #read only *returns* on data
+# messages — it silently auto-pongs the server's ~10s pings internally. A TCP
+# socket that dies without a close frame would therefore hang #read forever
+# (the original silent-death bug). So we hook the connection's control-frame
+# handlers to stamp a liveness clock on every server ping/pong, and a watchdog
+# reconnects if that clock goes stale (no frame at all for IDLE_TIMEOUT).
+def run_session(ws_url)
+  endpoint = Async::HTTP::Endpoint.parse(ws_url)
+
+  Async::WebSocket::Client.connect(endpoint) do |connection|
+    task = Async::Task.current
+    last = [mono]   # mutable holder so the hook + watchdog share one clock
+
+    # Stamp liveness whenever the server pings/pongs us (~every 10s on a healthy
+    # socket). define_method requires explicit super(frame) — bare super raises.
+    heartbeat = Module.new do
+      define_method(:receive_ping) { |frame| super(frame); last[0] = mono }
+      define_method(:receive_pong) { |frame| super(frame); last[0] = mono }
+    end
+    connection.singleton_class.prepend(heartbeat)
+
+    reader = task.async do
+      catch(:disconnect) do
+        while (message = connection.read)
+          last[0] = mono
+          handle_message(JSON.parse(message.to_str), connection)
+        end
+      end
+    end
+
+    check = [IDLE_TIMEOUT / 3.0, 5.0].min
+    watchdog = task.async do
+      loop do
+        sleep check
+        connection.flush rescue nil   # push any buffered pong replies to Slack
+        next unless mono - last[0] > IDLE_TIMEOUT
+        log "no socket activity for #{IDLE_TIMEOUT}s — assuming dead socket; reconnecting"
+        reader.stop
+        break
+      end
+    end
+
+    begin
+      reader.wait               # returns on server disconnect or watchdog stop
+    rescue Async::Stop
+      # reader was stopped by the watchdog; fall through to reconnect
+    ensure
+      watchdog.stop
+    end
+  end
+end
+
+trap("INT")  { log "bye"; exit 0 }
+trap("TERM") { log "bye"; exit 0 }
+
+log "starting (channel: #{FILTER_CHAN || "all"}, users: " \
+    "#{FILTER_USERS.empty? ? "all" : FILTER_USERS.map { |u| user_name(u) }.join(", ")}, " \
+    "target: #{FILTER_TARGET || "all"})"
+
+loop do
+  Async do
+    run_session(open_connection_url)
+  end
+rescue Interrupt
+  exit 0
+rescue StandardError => e
+  log "#{e.class}: #{e.message} — retrying in 5s"
+  sleep 5
+end
