@@ -10,13 +10,20 @@
 # stable $TMUX_PANE handle on EVERY line, so moving windows around in tmux is
 # handled automatically — the next message just routes to the new id.
 #
-# Reconnect / disconnect notices are always passed through so a supervising
-# agent (e.g. a Claude Monitor) can see the socket bounce.
+# Reconnect / disconnect notices are NOT surfaced individually: Slack routinely
+# asks Socket Mode clients to reconnect (~hourly, to rebalance load) and the
+# listener self-heals, so each bounce is benign noise. We only emit a notice
+# when the socket is genuinely LOOPING — RECONNECT_THRESHOLD bounces within
+# RECONNECT_WINDOW seconds — which is the case a supervising agent should act on.
 #
 # Usage: watch-pane.sh [stream_log_path]
 #   Default log: $HOME/.local/state/slack-noti/stream.log
 
 LOG="${1:-$HOME/.local/state/slack-noti/stream.log}"
+
+# Loop detection for socket reconnects (see note above).
+RECONNECT_THRESHOLD="${BOEHS_SLACK_NOTI_RECONNECT_THRESHOLD:-3}"
+RECONNECT_WINDOW="${BOEHS_SLACK_NOTI_RECONNECT_WINDOW:-120}"
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "Usage: $(basename "$0") [stream_log_path]"
@@ -39,6 +46,7 @@ if [[ ! -e "$LOG" ]]; then
 fi
 
 # -n0: start at end (no replay). -F: keep following across rotation/recreate.
+recon_times=()  # epoch seconds of recent reconnect notices (sliding window)
 tail -n0 -F "$LOG" | while IFS= read -r line; do
   # Re-resolve our pane's CURRENT positional id every line: $TMUX_PANE (%N) is
   # stable across moves, but session:window.pane changes when windows move.
@@ -51,6 +59,22 @@ tail -n0 -F "$LOG" | while IFS= read -r line; do
       # the same way focusing the pane does (see .tmux.conf pane-focus-in hook).
       tmux set-window-option -t "$TMUX_PANE" -u @special_activity 2>/dev/null || true
       ;;
-    *retrying*|*"server asked to disconnect"*) printf '%s\n' "$line" ;;
+    *retrying*|*"server asked to disconnect"*)
+      # Record this bounce and prune anything outside the sliding window.
+      now=$(date +%s)
+      kept=()
+      for t in "${recon_times[@]}"; do
+        (( now - t < RECONNECT_WINDOW )) && kept+=("$t")
+      done
+      kept+=("$now")
+      recon_times=("${kept[@]}")
+      # Only surface when the socket is actually looping; then reset so we warn
+      # once per burst rather than on every line.
+      if (( ${#recon_times[@]} >= RECONNECT_THRESHOLD )); then
+        printf '[watch-pane] Slack socket reconnecting repeatedly (%d times in %ds) — possible loop\n' \
+          "${#recon_times[@]}" "$RECONNECT_WINDOW"
+        recon_times=()
+      fi
+      ;;
   esac
 done
