@@ -25,6 +25,12 @@ LOG="${1:-$HOME/.local/state/slack-noti/stream.log}"
 RECONNECT_THRESHOLD="${BOEHS_SLACK_NOTI_RECONNECT_THRESHOLD:-3}"
 RECONNECT_WINDOW="${BOEHS_SLACK_NOTI_RECONNECT_WINDOW:-120}"
 
+# Optional host label, mirroring claude-notify's CLAUDE_NOTIFY_HOST. When set, this
+# pane's target is matched as "<host>:session:window.pane" (e.g. "gfe:code:1.0"),
+# so a stream forwarded from another machine — whose listener tagged lines with the
+# host-prefixed pane id — routes to the right pane here. Unset = bare pane id.
+HOST_LABEL="${BOEHS_SLACK_NOTI_HOST:-${CLAUDE_NOTIFY_HOST:-}}"
+
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   echo "Usage: $(basename "$0") [stream_log_path]"
   echo ""
@@ -51,6 +57,9 @@ tail -n0 -F "$LOG" | while IFS= read -r line; do
   # Re-resolve our pane's CURRENT positional id every line: $TMUX_PANE (%N) is
   # stable across moves, but session:window.pane changes when windows move.
   me=$(tmux display-message -t "$TMUX_PANE" -p '#S:#{window_index}.#{pane_index}' 2>/dev/null)
+  # When HOST_LABEL is set this machine consumes a stream forwarded from another
+  # host, whose lines are tagged with the host-prefixed pane id (e.g. gfe:code:1.0).
+  [[ -n "$HOST_LABEL" ]] && me="${HOST_LABEL}:${me}"
   case "$line" in
     *" $me ⤷ "*)
       printf '%s\n' "$line"
