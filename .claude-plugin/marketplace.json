@@ -170,6 +170,17 @@
       },
       "source": "./plugins/watch-slack",
       "category": "productivity"
+    },
+    {
+      "name": "copy-for-slack",
+      "version": "1.0.0",
+      "description": "Convert the last assistant message from Markdown to Slack-compatible formatting and copy it to the clipboard",
+      "author": {
+        "name": "Eric Boehs",
+        "url": "https://github.com/ericboehs"
+      },
+      "source": "./plugins/copy-for-slack",
+      "category": "productivity"
     }
   ]
 }
