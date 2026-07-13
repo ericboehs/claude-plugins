@@ -65,19 +65,24 @@ Only use when the user explicitly asks to submit. This is different from Save (w
 ### Create a leave request
 
 ```bash
-# Single leave request
+# Save a draft (INUSE) — NOT sent for approval
 unanet leave --data '{"begin":"2026-04-03","end":"2026-04-03","hours":8}'
 
+# Submit for approval (what the user usually wants)
+unanet leave --data '{"begin":"2026-04-03","end":"2026-04-03","hours":8}' --submit
+
 # Batch multiple leave requests in one session (preferred for multiple dates)
-unanet leave --data '[{"begin":"2026-04-03","end":"2026-04-03","hours":8},{"begin":"2026-05-15","end":"2026-05-15","hours":8}]'
+unanet leave --data '[{"begin":"2026-04-03","end":"2026-04-03","hours":8},{"begin":"2026-05-15","end":"2026-05-15","hours":8}]' --submit
 ```
+
+**⚠️ Submit at creation.** Phrases like "put in a leave request", "request PTO", or "take off X" mean the user wants it **submitted** — pass `--submit`. Without it the request lands as an **INUSE draft** that you **cannot submit later**: editing an existing draft returns "Unauthorized" for a self-service role. If a draft got stranded, delete it (trash icon on its row in Time → List — user must do the delete) and re-create with `--submit`.
 
 **Field mapping:**
 - `begin`: Start date (YYYY-MM-DD)
 - `end`: End date (YYYY-MM-DD), same as begin for single-day requests
-- `hours`: Total hours for the leave period (8 per day typically)
+- `hours`: Total hours for the leave period (8 per weekday; a range bills 8×weekdays)
 - `comments`: Optional comment text
-- `submit`: Set to `true` to submit for approval (default: save only)
+- `submit`: Per-entry `true` to submit for approval (same as the `--submit` flag; default: save only)
 - `includeNonWorkDays`: Set to `true` to include weekends (default: false)
 
 **Batch leave requests:** When the user requests multiple leave dates, always use a JSON array to create them all in one CLI invocation. This uses a single browser session and avoids repeated Okta logins. Each request gets its own numbered screenshot (`-1.png`, `-2.png`, etc.).
@@ -100,6 +105,7 @@ Returns JSON array of all current leave requests with begin/end dates, hours, st
 
 ## Options
 
+- `--submit` — (leave) Submit for approval instead of saving a draft. Must be set at creation; drafts can't be submitted later.
 - `--visible` — Show the browser window (useful for debugging)
 - `--no-save` — Preview without saving (works with fill and leave)
 - `--screenshot PATH` — Custom screenshot path (default: `/tmp/unanet-screenshot.png`)

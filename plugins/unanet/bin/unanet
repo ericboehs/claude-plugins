@@ -429,6 +429,10 @@ Options:
   --data JSON              JSON data for fill/leave commands
                            fill:  {"project":"EERT","hours":8,"days":["2026-03-18"]}
                            leave: {"begin":"2026-04-03","end":"2026-04-03","hours":8}
+  --submit                 (leave) Submit for approval instead of saving a draft.
+                           Must be set at creation — an existing INUSE draft can't
+                           be submitted later (edit route is role-blocked). Per-entry
+                           "submit": true in --data also works.
   --no-save                Preview without saving
   --visible                Show browser window (default: headless)
   --screenshot PATH        Save screenshot (default: /tmp/unanet-screenshot.png)
@@ -439,7 +443,7 @@ Examples:
   unanet fill --data '{"project":"EERT","hours":8,"days":["2026-03-18","2026-03-19"]}'
   unanet fill --data '{"project":"EERT","hours":8,"days":["2026-03-18"]}' --visible
   unanet leave --data '{"begin":"2026-04-03","end":"2026-04-03","hours":8}'
-  unanet leave --data '{"begin":"2026-04-03","end":"2026-04-04","hours":16,"comments":"Vacation"}'
+  unanet leave --data '{"begin":"2026-04-03","end":"2026-04-04","hours":16,"comments":"Vacation"}' --submit
   unanet leave --data '[{"begin":"2026-04-03","end":"2026-04-03","hours":8},{"begin":"2026-05-15","end":"2026-05-15","hours":8}]'
   unanet leave-list`);
 }
@@ -455,6 +459,7 @@ async function main() {
 
   const visible = args.includes('--visible');
   const noSave = args.includes('--no-save');
+  const submitFlag = args.includes('--submit');
   const dataIdx = args.indexOf('--data');
   const rawData = dataIdx !== -1 ? JSON.parse(args[dataIdx + 1]) : null;
   // Support both single object and array of objects
@@ -541,9 +546,13 @@ async function main() {
             comments: entry.comments || '',
             includeNonWorkDays: entry.includeNonWorkDays || false,
           };
+          // Submit for approval when --submit is passed or the entry opts in.
+          // Note: submitting must happen at creation — editing an existing INUSE
+          // draft to submit it later returns "Unauthorized" for a self-service role.
+          const doSubmit = submitFlag || entry.submit;
           await createLeaveRequest(page, config, leaveData);
           if (!noSave) {
-            if (entry.submit) {
+            if (doSubmit) {
               await submitLeaveRequest(page);
             } else {
               await saveLeaveRequest(page);
@@ -555,7 +564,10 @@ async function main() {
           await page.screenshot({ path: ssPath, fullPage: true });
           results.push({ begin: entry.begin, end: entry.end, hours: entry.hours, screenshot: ssPath });
         }
-        const action = noSave ? 'Preview (not saved)' : 'Leave request saved';
+        const submitted = submitFlag || fillEntries.every(e => e.submit);
+        const action = noSave
+          ? 'Preview (not saved)'
+          : (submitted ? 'Leave request submitted for approval' : 'Leave request saved as draft (not submitted — pass --submit to send for approval)');
         if (results.length === 1) {
           console.log(`${action}. Screenshot at ${results[0].screenshot}`);
         } else {
