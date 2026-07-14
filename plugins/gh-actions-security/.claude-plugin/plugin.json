@@ -1,0 +1,9 @@
+{
+  "name": "gh-actions-security",
+  "version": "1.0.0",
+  "description": "Security checklist for GitHub Actions workflows — SHA pinning, least-privilege permissions, zizmor linting, and repo hardening",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}
