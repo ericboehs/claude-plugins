@@ -86,7 +86,7 @@ unanet leave-list
 ## Claude Code Skills
 
 - `/unanet` — Natural language timesheet and leave management ("fill 8 hours EERT for Monday through Friday", "take off April 3rd")
-- `/setup-unanet` — Interactive setup wizard
+- `/setup-unanet` — Interactive setup wizard _(companion `unanet-setup` plugin)_
 
 ## How It Works
 

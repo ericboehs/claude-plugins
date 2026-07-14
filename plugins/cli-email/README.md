@@ -10,7 +10,7 @@ Daily email operations — list unread, read messages, archive, search.
 
 Uses [himalaya](https://github.com/pimalaya/himalaya) for fast CLI access to local Maildir, `mail-archive` for archiving with mbsync compatibility, and [qmd](https://github.com/tobi/qmd) for full-text email search.
 
-### `/setup-email`
+### `/setup-email` _(companion `cli-email-setup` plugin)_
 
 Guided installation and configuration of the full CLI email stack:
 

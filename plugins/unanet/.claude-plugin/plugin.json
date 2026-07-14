@@ -1,7 +1,7 @@
 {
   "name": "unanet",
-  "version": "1.0.0",
-  "description": "Automate Unanet timesheet entry via Playwright and Okta SSO with 1Password credentials",
+  "version": "1.1.0",
+  "description": "Automate Unanet timesheet entry via Playwright and Okta SSO with 1Password credentials. One-time install lives in the unanet-setup companion plugin.",
   "author": {
     "name": "Eric Boehs",
     "url": "https://github.com/ericboehs"

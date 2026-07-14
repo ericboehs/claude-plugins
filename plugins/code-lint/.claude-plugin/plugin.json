@@ -1,7 +1,7 @@
 {
   "name": "code-lint",
-  "version": "1.0.0",
-  "description": "Multi-language linting via PostToolUse hooks with per-project config and interactive setup wizard",
+  "version": "1.1.0",
+  "description": "Multi-language linting via PostToolUse hooks with per-project config. Interactive setup lives in the code-lint-setup companion plugin.",
   "author": {
     "name": "Eric Boehs",
     "url": "https://github.com/ericboehs"

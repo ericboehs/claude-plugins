@@ -1,0 +1,9 @@
+{
+  "name": "cli-email-setup",
+  "version": "1.0.0",
+  "description": "One-time install and configuration of the CLI email stack (mbsync, himalaya, neomutt, goimapnotify) for the cli-email plugin. Enable only when bootstrapping a new machine.",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}

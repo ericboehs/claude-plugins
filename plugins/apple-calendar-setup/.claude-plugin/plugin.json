@@ -1,0 +1,9 @@
+{
+  "name": "apple-calendar-setup",
+  "version": "1.0.0",
+  "description": "One-time install and configuration of the ical CLI for the apple-calendar plugin. Enable only when bootstrapping a new machine.",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}

@@ -14,7 +14,7 @@ Observe and control Mac apps. Snapshot the accessibility tree, act on element re
 - Electron apps (Slack, VS Code, Discord): run `scripts/enable-electron-a11y.sh <app>` once first, then snapshot
 - Act: `click`, `type`, `select`, `toggle`, `press`, headless by default
 
-### `/setup-agent-desktop`
+### `/setup-agent-desktop` _(companion `agent-desktop-setup` plugin)_
 
 Guided install honoring the aube supply-chain gates (verify binary via checksum + Sigstore, `--allow-low-downloads`, `approve-builds` + `rebuild`), plus Accessibility/Screen Recording permissions.
 

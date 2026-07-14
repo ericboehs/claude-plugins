@@ -1,0 +1,9 @@
+{
+  "name": "agent-desktop-setup",
+  "version": "1.0.0",
+  "description": "One-time install and configuration of the agent-desktop CLI for macOS accessibility automation, honoring aube supply-chain hardening. Enable only when bootstrapping a machine; companion to the agent-desktop plugin.",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}

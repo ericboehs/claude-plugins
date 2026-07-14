@@ -16,7 +16,7 @@ View agenda, create/update/delete events, and search calendar.
 
 Uses `-o json` output for stable event IDs, enabling reliable update and delete operations.
 
-### `/setup-calendar`
+### `/setup-calendar` _(companion `apple-calendar-setup` plugin)_
 
 Guided installation and configuration of the `ical` CLI tool, including macOS Calendar permission setup.
 

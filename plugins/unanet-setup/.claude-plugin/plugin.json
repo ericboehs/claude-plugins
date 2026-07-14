@@ -1,0 +1,9 @@
+{
+  "name": "unanet-setup",
+  "version": "1.0.0",
+  "description": "One-time setup of the unanet CLI and 1Password-backed credentials for the unanet timesheet plugin. Enable only when bootstrapping a new machine.",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}

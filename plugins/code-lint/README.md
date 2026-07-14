@@ -5,14 +5,14 @@ Multi-language linting via PostToolUse hooks. Automatically runs configured lint
 ## How It Works
 
 1. **Install** the plugin — hooks are registered automatically
-2. **Run `/setup-lint`** in your project — detects languages, interviews you, writes config
+2. **Run `/setup-lint`** in your project — detects languages, interviews you, writes config. This lives in the companion **`code-lint-setup`** plugin: enable it, run setup, then disable it again (it's a one-time wizard, kept out of this plugin so its skill isn't always loaded into context).
 3. **Edit files normally** — the hook runs matching linters after each Edit/Write and feeds errors back to Claude via exit code 2
 
 Config is stored per-project at `~/.claude/code-lint/<project-hash>/config.json` — nothing is written to the project repo.
 
 ## Skills
 
-### /setup-lint
+### /setup-lint _(companion `code-lint-setup` plugin)_
 
 Interactive setup wizard:
 - Auto-detects languages and available linters in the current project

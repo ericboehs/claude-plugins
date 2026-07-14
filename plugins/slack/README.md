@@ -14,9 +14,9 @@ Check unread, read messages, search, set status/DND, and browse activity.
 - `/slack search "query"` — Search messages
 - `/slack preset focus` — Apply a status preset
 
-### `/setup-slack`
+### `/setup-slack` _(companion `slack-setup` plugin)_
 
-Guided installation and configuration of `slk` CLI, including workspace authentication and cache setup.
+Guided installation and configuration of `slk` CLI, including workspace authentication and cache setup. Lives in the one-time **`slack-setup`** plugin — enable it to bootstrap a machine, then disable it so its skill isn't always loaded into context.
 
 ## Features
 
