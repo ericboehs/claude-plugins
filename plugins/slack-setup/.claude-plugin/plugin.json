@@ -1,0 +1,9 @@
+{
+  "name": "slack-setup",
+  "version": "1.0.0",
+  "description": "One-time install and configuration of the slk CLI (Slack Gem) for the slack plugin. Enable only when bootstrapping a new machine.",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}

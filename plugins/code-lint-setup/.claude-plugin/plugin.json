@@ -1,0 +1,9 @@
+{
+  "name": "code-lint-setup",
+  "version": "1.0.0",
+  "description": "One-time interactive setup wizard for the code-lint plugin — detects languages and linters and writes per-project config. Enable only when bootstrapping a machine or project.",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}
