@@ -247,6 +247,28 @@
       },
       "source": "./plugins/gh-actions-security",
       "category": "security"
+    },
+    {
+      "name": "md-to-pdf",
+      "version": "1.0.0",
+      "description": "Convert GitHub-flavored markdown to a PDF that looks like github.com's rendering, using pandoc and headless Chrome",
+      "author": {
+        "name": "Eric Boehs",
+        "url": "https://github.com/ericboehs"
+      },
+      "source": "./plugins/md-to-pdf",
+      "category": "productivity"
+    },
+    {
+      "name": "pptx",
+      "version": "1.0.0",
+      "description": "Generate and edit PowerPoint decks with pptxgenjs, including the render-and-inspect QA loop that catches layout breakage",
+      "author": {
+        "name": "Eric Boehs",
+        "url": "https://github.com/ericboehs"
+      },
+      "source": "./plugins/pptx",
+      "category": "productivity"
     }
   ]
 }

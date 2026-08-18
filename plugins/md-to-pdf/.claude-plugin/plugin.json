@@ -1,0 +1,9 @@
+{
+  "name": "md-to-pdf",
+  "version": "1.0.0",
+  "description": "Convert GitHub-flavored markdown to a PDF that looks like github.com's rendering, using pandoc and headless Chrome",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}

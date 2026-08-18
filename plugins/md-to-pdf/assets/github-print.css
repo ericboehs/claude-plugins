@@ -1,0 +1,71 @@
+/* GitHub-flavored print stylesheet — appended to github-markdown-css for PDF output */
+@page {
+  size: Letter;
+  margin: 0.75in;
+}
+
+html, body {
+  background: #ffffff !important;
+}
+
+body {
+  box-sizing: border-box;
+  margin: 0 auto;
+  max-width: 900px;
+  padding: 0;
+  font-size: 11pt;
+}
+
+/* github-markdown-css targets .markdown-body — pandoc wraps content in this class */
+.markdown-body {
+  box-sizing: border-box;
+  padding: 0;
+  background: #ffffff;
+}
+
+/* Make wide tables shrink to fit the page instead of overflowing */
+.markdown-body table {
+  display: table;
+  width: 100%;
+  table-layout: auto;
+  font-size: 9pt;
+  overflow-wrap: break-word;
+}
+
+.markdown-body table th,
+.markdown-body table td {
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+/* Keep short-label first column (row IDs like F-13, F-1) on one line */
+.markdown-body table th:first-child,
+.markdown-body table td:first-child {
+  white-space: nowrap;
+}
+
+/* Keep code blocks from overflowing */
+.markdown-body pre {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  page-break-inside: avoid;
+}
+
+.markdown-body pre > code {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* Avoid awkward page breaks */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  page-break-after: avoid;
+  break-after: avoid;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  height: auto;
+}

@@ -1,0 +1,9 @@
+{
+  "name": "pptx",
+  "version": "1.0.0",
+  "description": "Generate and edit PowerPoint decks with pptxgenjs, including the render-and-inspect QA loop that catches layout breakage",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}
