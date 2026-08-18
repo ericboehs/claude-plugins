@@ -11,7 +11,16 @@ fi
 input="$1"
 output="${2:-${input%.md}.pdf}"
 
-here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Resolve symlinks before locating the bundled CSS: this script is meant to be
+# linked onto PATH (e.g. ~/.local/bin/md2pdf), and a bare dirname of $0 would
+# point at the link's directory, not the plugin's. BSD readlink has no -f.
+src="${BASH_SOURCE[0]}"
+while [[ -L "$src" ]]; do
+  dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  [[ "$src" == /* ]] || src="$dir/$src"
+done
+here="$(cd -P "$(dirname "$src")" && pwd)"
 print_css="$here/../assets/github-print.css"
 
 # github-markdown-css is MIT but 22 KB of vendored third-party CSS, so it is
