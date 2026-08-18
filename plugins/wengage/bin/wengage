@@ -261,6 +261,17 @@ async function fetchStudentData(config, studentId, sessionId) {
   };
 }
 
+function decodeEntities(s) {
+  return s
+    .replace(/&amp;/g, '&')
+    .replace(/&#39;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(parseInt(n, 10)));
+}
+
 function parseAssignmentHtml(html) {
   // Strip scripts first, then convert HTML to tab-delimited text
   const textContent = html
@@ -274,7 +285,7 @@ function parseAssignmentHtml(html) {
   )];
 
   return matches.map(m => ({
-    title: m[1].trim(),
+    title: decodeEntities(m[1].trim()),
     dueDate: m[2].trim(),
     pointsPossible: parseFloat(m[3]) || 0,
     pointsReceived: parseFloat(m[4]) || 0,
@@ -379,6 +390,26 @@ function formatStudent(student, data) {
   return lines.join('\n');
 }
 
+function csvEscape(value) {
+  const s = String(value ?? '');
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function cleanClassName(name) {
+  return name.replace(/\s*-?\s*\d*\s*Per:.*/, '').replace(/-\d+\s*Per:.*/, '').trim();
+}
+
+function gradesCsvRows(student, data) {
+  const label = studentLabel(student, data);
+  return data.classes.map(c => [
+    student.name,
+    label,
+    cleanClassName(c.name),
+    c.grade,
+    data.balances.lunchBalance,
+  ].map(csvEscape).join(','));
+}
+
 function formatGradesOnly(student, data) {
   const lines = [];
   lines.push(`${studentLabel(student, data)} — Lunch: ${data.balances.lunchBalance}`);
@@ -412,6 +443,7 @@ Commands:
 Options:
   --type TYPE            Assignment type: scored, pending, incomplete, zero (default: scored)
   --output DIR           Output directory for reports (default: /tmp)
+  --csv                  Output as CSV (grades, assignments commands)
   --help                 Show this help
 
 Student filter:
@@ -421,9 +453,11 @@ Student filter:
 Examples:
   wengage grades
   wengage grades allie
+  wengage grades --csv
   wengage view layla
   wengage assignments allie reading
   wengage assignments allie reading --type zero
+  wengage assignments allie --csv
   wengage assignments layla math
   wengage report
   wengage report allie --output ~/Downloads
@@ -457,6 +491,7 @@ async function main() {
   const outputDir = outputIdx !== -1 ? args[outputIdx + 1] : '/tmp';
   const typeIdx = args.indexOf('--type');
   const assignmentType = typeIdx !== -1 ? args[typeIdx + 1] : 'scored';
+  const csv = args.includes('--csv');
 
   const config = loadConfig();
 
@@ -466,10 +501,18 @@ async function main() {
 
   switch (command) {
     case 'grades': {
-      for (const student of selectedStudents) {
-        const data = await fetchStudentData(config, student.id, sessionId);
-        console.log(formatGradesOnly(student, data));
-        if (selectedStudents.indexOf(student) < selectedStudents.length - 1) console.log('');
+      if (csv) {
+        console.log('student,student_label,class,grade,lunch_balance');
+        for (const student of selectedStudents) {
+          const data = await fetchStudentData(config, student.id, sessionId);
+          for (const row of gradesCsvRows(student, data)) console.log(row);
+        }
+      } else {
+        for (const student of selectedStudents) {
+          const data = await fetchStudentData(config, student.id, sessionId);
+          console.log(formatGradesOnly(student, data));
+          if (selectedStudents.indexOf(student) < selectedStudents.length - 1) console.log('');
+        }
       }
       break;
     }
@@ -503,22 +546,42 @@ async function main() {
         }
       }
 
-      for (const c of targetClasses) {
-        const assignments = await fetchAssignments(config, student.id, sessionId, c.sectionGuid, assignmentType);
-        console.log(`${student.name} — ${c.name} (${assignmentType})`);
-        console.log(`  Overall: ${c.grade}`);
-        if (assignments.length === 0) {
-          console.log(`  No ${assignmentType} assignments`);
-        } else {
-          console.log(`  ${'Assignment'.padEnd(40)} ${'Due'.padEnd(12)} ${'Pts'.padEnd(10)} Score`);
-          console.log(`  ${'-'.repeat(40)} ${'-'.repeat(12)} ${'-'.repeat(10)} ${'-'.repeat(8)}`);
+      if (csv) {
+        console.log('student,class,overall_grade,type,assignment,due_date,points_received,points_possible,score');
+        for (const c of targetClasses) {
+          const assignments = await fetchAssignments(config, student.id, sessionId, c.sectionGuid, assignmentType);
           for (const a of assignments) {
-            const title = a.title.length > 38 ? a.title.substring(0, 37) + '…' : a.title;
-            const pts = `${a.pointsReceived}/${a.pointsPossible}`;
-            console.log(`  ${title.padEnd(40)} ${a.dueDate.padEnd(12)} ${pts.padEnd(10)} ${a.score}`);
+            console.log([
+              student.name,
+              cleanClassName(c.name),
+              c.grade,
+              assignmentType,
+              a.title,
+              a.dueDate,
+              a.pointsReceived,
+              a.pointsPossible,
+              a.score,
+            ].map(csvEscape).join(','));
           }
         }
-        if (targetClasses.indexOf(c) < targetClasses.length - 1) console.log('');
+      } else {
+        for (const c of targetClasses) {
+          const assignments = await fetchAssignments(config, student.id, sessionId, c.sectionGuid, assignmentType);
+          console.log(`${student.name} — ${c.name} (${assignmentType})`);
+          console.log(`  Overall: ${c.grade}`);
+          if (assignments.length === 0) {
+            console.log(`  No ${assignmentType} assignments`);
+          } else {
+            console.log(`  ${'Assignment'.padEnd(40)} ${'Due'.padEnd(12)} ${'Pts'.padEnd(10)} Score`);
+            console.log(`  ${'-'.repeat(40)} ${'-'.repeat(12)} ${'-'.repeat(10)} ${'-'.repeat(8)}`);
+            for (const a of assignments) {
+              const title = a.title.length > 38 ? a.title.substring(0, 37) + '…' : a.title;
+              const pts = `${a.pointsReceived}/${a.pointsPossible}`;
+              console.log(`  ${title.padEnd(40)} ${a.dueDate.padEnd(12)} ${pts.padEnd(10)} ${a.score}`);
+            }
+          }
+          if (targetClasses.indexOf(c) < targetClasses.length - 1) console.log('');
+        }
       }
       break;
     }
