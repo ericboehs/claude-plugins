@@ -1,0 +1,18 @@
+pr-review
+Copyright 2026 Eric Boehs
+
+The reviewer prompts in skills/review-pr/reviewers/ are derived from the
+`pr-review-toolkit` plugin in Anthropic's official Claude Code plugin
+marketplace (https://github.com/anthropics/claude-code), licensed under the
+Apache License, Version 2.0.
+
+Modifications from the originals:
+  - Converted from Claude Code subagent definitions to standalone prompts.
+  - Removed "When to invoke" sections (dispatch is handled by the fan-out
+    script, not by agent auto-selection).
+  - Genericized organization-specific references (logging helpers, error-ID
+    modules, and TypeScript/React-specific style rules) into instructions to
+    follow the host project's own documented conventions.
+
+You may obtain a copy of the Apache License at:
+  http://www.apache.org/licenses/LICENSE-2.0

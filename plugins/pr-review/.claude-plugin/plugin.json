@@ -1,0 +1,9 @@
+{
+  "name": "pr-review",
+  "version": "1.0.0",
+  "description": "Comprehensive PR review that fans out specialized reviewers as concurrent isolated agents, then aggregates findings into a prioritized report",
+  "author": {
+    "name": "Eric Boehs",
+    "url": "https://github.com/ericboehs"
+  }
+}

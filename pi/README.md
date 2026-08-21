@@ -27,3 +27,24 @@ Add the extension to pi's global settings:
 The adapter does not mark a successful edit/write as failed when lint finds an
 issue. Instead, it appends the lint output to that tool result so the agent can
 fix it.
+
+## pr-review fan-out
+
+`plugins/pr-review` needs no subagent extension. Its `fan-out.sh` spawns each
+reviewer as a concurrent `pi -p` subprocess, so reviewer prompts stay out of the
+calling agent's context and only the finished reports come back.
+
+Children run with `-ne -ns -np` (no extensions, skills, or prompt templates),
+which measured ~2.2K prompt tokens versus ~11.8K for a child inheriting the full
+config. Context files stay enabled so reviewers can check `AGENTS.md`/`CLAUDE.md`
+compliance.
+
+Register it like any other skill directory:
+
+```json
+{
+  "skills": [
+    "~/Code/github.com/ericboehs/claude-plugins/plugins/pr-review/skills"
+  ]
+}
+```
