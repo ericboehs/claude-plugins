@@ -228,7 +228,7 @@
     },
     {
       "name": "copy-for-slack",
-      "version": "1.0.0",
+      "version": "1.0.1",
       "description": "Convert the last assistant message from Markdown to Slack-compatible formatting and copy it to the clipboard",
       "author": {
         "name": "Eric Boehs",

@@ -1,3 +1,9 @@
+---
+name: copy-for-slack
+description: Convert the previous assistant response to Slack-compatible formatting and copy it to the macOS clipboard. Use when the user says "/copy-for-slack", "copy for Slack", or "copy that for Slack".
+tools: Bash
+---
+
 # Copy for Slack Skill
 
 Copies the last assistant message to the clipboard, converted to Slack-compatible formatting.
