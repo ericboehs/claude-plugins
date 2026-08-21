@@ -78,6 +78,8 @@ ${CLAUDE_PLUGIN_ROOT}/scripts/x-article.sh "https://x.com/i/article/<id>" > "$SC
 wc -c "$SCRATCH/article.txt"    # a real article is >5KB; ~600 bytes means a login wall
 ```
 
+If `CLAUDE_PLUGIN_ROOT` is not set, find the script relative to this SKILL.md (`../../scripts/x-article.sh`).
+
 Then Read the file. The script opens a throwaway window, waits for hydration,
 scrolls twice for lazy-loaded tail content, and closes the window.
 
