@@ -2,7 +2,6 @@
 name: wengage
 description: Check student grades, attendance, assignments, and balances from Wengage Guardian Portal. Use when user asks about grades, school, report cards, attendance, or says "/wengage".
 tools: Bash, Read
-disable-model-invocation: true
 ---
 
 # Wengage Grade Checker
