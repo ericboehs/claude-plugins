@@ -2,6 +2,7 @@
 name: review-pr
 description: Comprehensive PR review that fans out specialized reviewers (code, tests, errors, types, comments, simplify) as concurrent isolated agents, then aggregates findings into a prioritized report. Use when user says "/review-pr", "review this PR", "review my changes", or wants a pre-PR quality check.
 argument-hint: "[aspects...] [--base REF]"
+disable-model-invocation: true
 ---
 
 # PR Review

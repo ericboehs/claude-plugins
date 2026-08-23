@@ -2,6 +2,7 @@
 name: watch-ci
 description: Monitor GitHub Actions CI status for the current branch, waiting until checks pass or fail. Use when user says "/watch-ci", "watch ci", "wait for ci", or "monitor ci".
 tools: Bash
+disable-model-invocation: true
 ---
 
 # watch-ci

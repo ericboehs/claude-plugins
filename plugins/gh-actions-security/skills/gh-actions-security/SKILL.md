@@ -1,6 +1,7 @@
 ---
 name: gh-actions-security
 description: Security checklist for GitHub Actions. Use whenever creating or editing anything under .github/workflows/ — pin SHAs, scope permissions, lint with zizmor, and harden repo settings.
+disable-model-invocation: true
 ---
 
 # GitHub Actions Security

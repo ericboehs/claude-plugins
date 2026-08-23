@@ -1,6 +1,7 @@
 ---
 name: md-to-pdf
 description: Convert a GitHub-flavored markdown file to a GitHub-styled PDF using pandoc + headless Chrome. Use when the user asks to convert markdown to PDF, render an .md as PDF, or says "/md-to-pdf".
+disable-model-invocation: true
 ---
 
 # md-to-pdf Skill

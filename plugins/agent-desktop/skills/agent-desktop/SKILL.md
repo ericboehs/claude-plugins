@@ -2,6 +2,7 @@
 name: agent-desktop
 description: Automate macOS apps via the accessibility tree using the agent-desktop CLI. Snapshot UI, click/type/select by element ref, manage windows, screenshot. Use when asked to control, drive, or automate a Mac app, read or act on on-screen UI, "snapshot an app", or "/agent-desktop".
 tools: Bash
+disable-model-invocation: true
 ---
 
 # agent-desktop (macOS accessibility automation)

@@ -2,6 +2,7 @@
 name: gh-copilot-review
 description: Wait for a GitHub Copilot review on the current branch's PR, address all feedback, and push fixes. Use when user says "/gh-copilot-review", "copilot review", or "wait for copilot".
 tools: Bash, Read, Edit, Write
+disable-model-invocation: true
 ---
 
 # gh-copilot-review

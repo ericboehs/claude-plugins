@@ -2,6 +2,7 @@
 name: gist-update
 description: Update an existing GitHub Gist from a local file. Use when user says "/gist-update", "update the gist", or "sync gist".
 tools: Bash, Read
+disable-model-invocation: true
 ---
 
 # Update an existing GitHub Gist

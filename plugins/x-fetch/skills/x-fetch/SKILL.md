@@ -2,6 +2,7 @@
 name: x-fetch
 description: Retrieve the full content of an X/Twitter link — tweet text, images, and gated long-form articles. Use when given an x.com or twitter.com URL, or when the user says "/x-fetch", "read this tweet", or "what does this X post say".
 tools: Bash, Read
+disable-model-invocation: true
 ---
 
 # Fetch an X/Twitter link

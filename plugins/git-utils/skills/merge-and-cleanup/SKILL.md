@@ -2,6 +2,7 @@
 name: merge-and-cleanup
 description: Merge the current branch's PR (squash) and clean up — delete branch, switch to default branch, pull, remove worktree if applicable. Use when user says "/merge-and-cleanup", "merge and cleanup", or "merge this PR".
 tools: Bash, AskUserQuestion
+disable-model-invocation: true
 ---
 
 # Merge and Cleanup

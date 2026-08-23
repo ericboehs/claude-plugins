@@ -2,6 +2,7 @@
 name: gist-create
 description: Create a GitHub Gist from a file path. Use when user says "/gist-create", "create a gist", or "gist this file".
 tools: Bash, Read
+disable-model-invocation: true
 ---
 
 # Create a GitHub Gist

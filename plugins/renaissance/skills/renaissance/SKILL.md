@@ -2,6 +2,7 @@
 name: renaissance
 description: Check Accelerated Reader progress, quiz scores, reading goals, completed books, and search for AR books. Use when user asks about AR, reading progress, Allie's or Layla's books, quiz scores, book search, or says "/renaissance".
 tools: Bash, Read
+disable-model-invocation: true
 ---
 
 # Renaissance AR Progress

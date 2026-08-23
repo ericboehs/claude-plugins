@@ -2,6 +2,7 @@
 name: copy-to-icloud-downloads
 description: Copy files to iCloud Downloads for reading on iPhone/iPad. Use when user says "/copy-to-icloud-downloads", "put in icloud downloads", "copy to icloud", or "send to my phone".
 tools: Bash
+disable-model-invocation: true
 ---
 
 # Copy to iCloud Downloads

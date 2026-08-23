@@ -2,6 +2,7 @@
 name: commit-and-push
 description: Stage, commit, and push changes to origin. Use when user says "/commit-and-push", "commit and push", or "push this up".
 tools: Bash, AskUserQuestion
+disable-model-invocation: true
 ---
 
 # Commit and Push

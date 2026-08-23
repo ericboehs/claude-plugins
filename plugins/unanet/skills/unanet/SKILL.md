@@ -2,6 +2,7 @@
 name: unanet
 description: Fill timesheets, view time entries, submit timesheets, create and view leave requests on Unanet. Use when user asks about timesheets, time entry, logging hours, PTO, leave requests, taking time off, viewing leave, or says "/unanet".
 tools: Bash, Read
+disable-model-invocation: true
 ---
 
 # Unanet Timesheet Manager
