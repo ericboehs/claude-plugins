@@ -59,7 +59,7 @@ The agent's own notification hook posts to #notifications with a header like
 `:claude: code:1.0`, creating a thread per pane. When the user replies in that
 thread, the listener tags the reply with the pane (`code:1.0`) and `watch-pane.sh`
 routes it to the matching pane. This plugin is the **listener half**; the hook
-that posts the threads (e.g. `claude-notify`) is separate.
+that posts the threads (e.g. `agent-notify`) is separate.
 
 ## Service management
 

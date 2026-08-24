@@ -63,7 +63,7 @@ so do **not** hardcode a pane id.
 ## Important notes
 
 - The skill never posts to Slack; it only listens. The user's own notification
-  hook (e.g. `claude-notify`) is what creates the `:claude:` threads.
+  hook (e.g. `agent-notify`) is what creates the `:claude:` threads.
 - One residual gap: a reply to a thread whose root was posted **before** a tmux
   move keeps the old pane id, so the move-aware consumer won't match it. Routing
   on the stable `$TMUX_PANE` id in the notify hook closes this; mention it if the

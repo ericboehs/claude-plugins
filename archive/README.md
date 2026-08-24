@@ -12,7 +12,7 @@ shared stream log, plus a per-pane consumer (`watch-pane.sh`) that grepped it.
 The Claude mobile app covers answering from away now, so the return path is not
 worth a long-lived listener.
 
-Outbound notifications are unaffected: `claude-notify` posts through `slack-noti`
+Outbound notifications are unaffected: `agent-notify` posts through `slack-noti`
 (an incoming-webhook one-liner in dotfiles), which was never part of this plugin.
 
 To bring it back, know that it had been silently dead since 2026-06-29:
